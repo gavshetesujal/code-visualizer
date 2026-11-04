@@ -434,6 +434,63 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       font-size: 13px;
     }
 
+    /* EMPTY STATE ON CANVAS */
+    .empty-canvas-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 260px;
+      padding: 40px;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .empty-canvas-icon {
+      color: #334155;
+    }
+
+    .empty-canvas-msg {
+      font-size: 14px;
+      font-weight: 500;
+      color: #64748b;
+      letter-spacing: 0.3px;
+    }
+
+    .empty-ll-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      background: rgba(13, 21, 39, 0.85);
+      border: 1px dashed rgba(56, 189, 248, 0.4);
+      padding: 16px 28px;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .empty-pointer-badge {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: var(--orange-accent);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 800;
+      padding: 4px 12px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    .empty-null-badge {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 800;
+      padding: 4px 12px;
+      border-radius: 6px;
+    }
+
     /* LIVE EXECUTION CODE INDICATOR */
     .live-code-indicator {
       position: absolute;
@@ -827,8 +884,17 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
     // Adaptive Canvas Renderer
     function renderCanvas() {
-      const step = session.steps[currentStepIndex];
-      if (!step) return;
+      const step = session.steps && session.steps[currentStepIndex];
+      if (!step) {
+        liveStmt.textContent = 'Waiting for execution...';
+        liveLine.textContent = '';
+        stepCounterText.textContent = 'Step 0 of 0';
+        backwardBtn.disabled = true;
+        forwardBtn.disabled = true;
+        structureTypePill.textContent = 'Waiting';
+        renderEmptyCanvas('Waiting for program execution...');
+        return;
+      }
 
       // Update Live Indicator
       liveStmt.textContent = step.statement;
@@ -846,10 +912,51 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       if (struct) {
         structureTypePill.textContent = struct.title || struct.kind;
         renderRowStructure(struct);
+      } else {
+        structureTypePill.textContent = 'Execution Flow';
+        renderEmptyCanvas('Waiting for program execution...');
       }
     }
 
+    function renderEmptyCanvas(msg) {
+      nodesContainer.innerHTML = \`
+        <div class="empty-canvas-container">
+          <svg class="empty-canvas-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <div class="empty-canvas-msg">\${msg || 'Waiting for program execution...'}</div>
+        </div>
+      \`;
+    }
+
     function renderRowStructure(struct) {
+      const blocks = struct.blocks || [];
+      const connections = struct.connections || [];
+      const pointers = struct.pointers || [];
+      const callout = struct.callout;
+
+      // Empty state (e.g. head = NULL before allocations occur)
+      if (blocks.length === 0) {
+        if (struct.kind === 'linked-list' || (callout && callout.text && callout.text.includes('NULL'))) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'empty-ll-card';
+          wrapper.innerHTML = \`
+            <div class="empty-pointer-badge">HEAD</div>
+            <div class="arrow-connection">
+              <div class="arrow-line"></div>
+              <div class="arrow-head"></div>
+            </div>
+            <div class="empty-null-badge">NULL</div>
+            \${callout && callout.text ? \`<span style="font-size: 12px; color: #94a3b8; margin-left: 8px;">(\${callout.text})</span>\` : ''}
+          \`;
+          nodesContainer.appendChild(wrapper);
+        } else {
+          renderEmptyCanvas(callout && callout.text ? callout.text : 'Waiting for program execution...');
+        }
+        return;
+      }
+
       const row = document.createElement('div');
       row.className = 'flow-row';
 
