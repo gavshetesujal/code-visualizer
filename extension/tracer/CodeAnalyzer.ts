@@ -32,30 +32,33 @@ export class CodeAnalyzer {
     }
 
     const lines = code.split('\n');
+    const cleanLineObjs = ProgramSimulator.cleanSourceLines(lines);
+    const cleanLines = cleanLineObjs.map(l => l.trimmed);
+    const cleanCode = cleanLineObjs.map(l => l.clean).join('\n');
 
-    if (this.isTree(code)) {
-      return this.analyzeTree(code, lines, fileName);
+    if (this.isTree(cleanCode)) {
+      return this.analyzeTree(cleanCode, cleanLines, fileName);
     }
-    if (this.isStack(code)) {
-      return this.analyzeStack(code, lines, fileName);
+    if (this.isStack(cleanCode)) {
+      return this.analyzeStack(cleanCode, cleanLines, fileName);
     }
-    if (this.isQueue(code)) {
-      return this.analyzeQueue(code, lines, fileName);
+    if (this.isQueue(cleanCode)) {
+      return this.analyzeQueue(cleanCode, cleanLines, fileName);
     }
-    if (this.isLinkedList(code)) {
-      return this.analyzeLinkedList(code, lines, fileName);
+    if (this.isLinkedList(cleanCode)) {
+      return this.analyzeLinkedList(cleanCode, cleanLines, fileName);
     }
 
-    if (ProgramSimulator.canSimulate(code)) {
+    if (ProgramSimulator.canSimulate(cleanCode)) {
       return ProgramSimulator.simulate(code, lines, fileName, providedInputs, orderedInputs);
     }
 
-    if (this.isArray(code)) {
-      return this.analyzeArray(code, lines, fileName);
+    if (this.isArray(cleanCode)) {
+      return this.analyzeArray(cleanCode, cleanLines, fileName);
     }
 
     // Default: Clean Execution Flow (Functions, calculations, loops, if-else)
-    return this.analyzeExecutionFlow(code, lines, fileName);
+    return this.analyzeExecutionFlow(cleanCode, cleanLines, fileName);
   }
 
   private static isTree(code: string): boolean {
@@ -460,7 +463,7 @@ export class CodeAnalyzer {
 
     lines.forEach((l, idx) => {
       const trimmed = l.trim();
-      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('import') || trimmed.startsWith('using')) {
+      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('#') || trimmed.startsWith('import') || trimmed.startsWith('using')) {
         return;
       }
       validLines.push({ line: idx + 1, text: trimmed });

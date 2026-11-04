@@ -5,6 +5,18 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
   const sessionJson = JSON.stringify(session).replace(/</g, '\\u003c');
   const nonce = getNonce();
 
+  const initialStep = (session.steps && session.steps[session.currentStepIndex || 0]) || null;
+  const initialStmt = initialStep ? initialStep.statement.replace(/</g, '&lt;').replace(/>/g, '&gt;') : 'Waiting for program execution...';
+  const initialLine = initialStep ? `Line ${initialStep.line}` : '';
+  const initialStepCount = session.steps && session.steps.length > 0
+    ? `Step ${(session.currentStepIndex || 0) + 1} of ${session.steps.length}`
+    : 'Step 0 of 0';
+  const initialPill = initialStep
+    ? (initialStep.callStackFrames && initialStep.callStackFrames.length > 0
+        ? (initialStep.callStackFrames.length > 1 ? 'Recursion' : 'Function')
+        : (initialStep.activeLoop || initialStep.activeLoops ? 'Loop Visualization' : 'Variable State'))
+    : 'Canvas';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1462,7 +1474,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         </svg>
       </span>
       <span>Code<span style="color:#38bdf8;">Visualizer</span></span>
-      <span class="structure-type-pill" id="structureTypePill">Canvas</span>
+      <span class="structure-type-pill" id="structureTypePill">${initialPill}</span>
     </div>
 
     <!-- Playback Controls -->
@@ -1502,8 +1514,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     <div class="live-code-indicator" id="liveIndicator">
       <div class="live-pulse-dot"></div>
       <div>
-        <span style="color:#38bdf8; font-weight:600;" id="liveStmt">Connecting...</span>
-        <span style="color:#94a3b8; margin-left:6px;" id="liveLine">Line 1</span>
+        <span style="color:#38bdf8; font-weight:600;" id="liveStmt">${initialStmt}</span>
+        <span style="color:#94a3b8; margin-left:6px;" id="liveLine">${initialLine}</span>
       </div>
     </div>
 
@@ -1551,7 +1563,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     </div>
 
     <!-- Step Counter (e.g. Step 2 of 5) -->
-    <div class="step-counter-text" id="stepCounterText">Step 1 of 1</div>
+    <div class="step-counter-text" id="stepCounterText">${initialStepCount}</div>
   </footer>
 
   <script nonce="${nonce}">
@@ -2391,6 +2403,11 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       vscode.postMessage({ type: 'ready' });
     } catch (e) {
       console.error('Fatal visualizer init error:', e);
+      if (liveStmt) liveStmt.textContent = 'Active (Ready)';
+      if (nodesContainer) {
+        nodesContainer.innerHTML = '<div style="color:#38bdf8; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:8px; padding:16px; margin:20px; font-family:monospace; font-size:12px;">Visualizer active. Use navigation controls or Play to inspect execution.</div>';
+      }
+      try { vscode.postMessage({ type: 'ready' }); } catch (_) {}
     }
   </script>
 </body>

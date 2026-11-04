@@ -26,6 +26,83 @@ interface FunctionDef {
 }
 
 export class ProgramSimulator {
+  /**
+   * Strips single-line comments (//), trailing comments, and block comments (/* ... *\/)
+   * while strictly preserving:
+   * 1. Original 1-based line numbering (for editor highlight synchronization)
+   * 2. Quoted strings that contain comment symbols like "http://site.com" or "// text"
+   */
+  public static cleanSourceLines(lines: string[]): { lineNum: number; raw: string; clean: string; trimmed: string }[] {
+    let inBlockComment = false;
+    const result: { lineNum: number; raw: string; clean: string; trimmed: string }[] = [];
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+      const raw = lines[lineIdx];
+      let inString = false;
+      let stringChar = '';
+      let escapeNext = false;
+      const cleanChars: string[] = [];
+
+      for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        const nextCh = i + 1 < raw.length ? raw[i + 1] : '';
+
+        if (inBlockComment) {
+          if (ch === '*' && nextCh === '/') {
+            inBlockComment = false;
+            i++; // skip '/'
+          }
+          continue;
+        }
+
+        if (inString) {
+          cleanChars.push(ch);
+          if (escapeNext) {
+            escapeNext = false;
+          } else if (ch === '\\') {
+            escapeNext = true;
+          } else if (ch === stringChar) {
+            inString = false;
+          }
+          continue;
+        }
+
+        // Check for start of string literal
+        if (ch === '"' || ch === "'") {
+          inString = true;
+          stringChar = ch;
+          escapeNext = false;
+          cleanChars.push(ch);
+          continue;
+        }
+
+        // Check for start of block comment /*
+        if (ch === '/' && nextCh === '*') {
+          inBlockComment = true;
+          i++; // skip '*'
+          continue;
+        }
+
+        // Check for single line comment //
+        if (ch === '/' && nextCh === '/') {
+          break; // Discard rest of the line
+        }
+
+        cleanChars.push(ch);
+      }
+
+      const clean = cleanChars.join('');
+      result.push({
+        lineNum: lineIdx + 1,
+        raw,
+        clean,
+        trimmed: clean.trim()
+      });
+    }
+
+    return result;
+  }
+
   public static canSimulate(code: string): boolean {
     const hasVarDecl = /\b(int|float|double|char|string|bool|long|short)\s+[a-zA-Z_]\w*/.test(code);
     const hasLoop = /\b(for|while|do)\b/.test(code);
@@ -171,11 +248,8 @@ export class ProgramSimulator {
     let cinCallIndex = 0;
     let isWaitingForInput = false;
 
-    // Cleaned lines with original 1-based line numbers
-    const cleanLines: { lineNum: number; raw: string; trimmed: string }[] = [];
-    lines.forEach((l, idx) => {
-      cleanLines.push({ lineNum: idx + 1, raw: l, trimmed: l.trim() });
-    });
+    // Cleaned lines with comments stripped and original 1-based line numbers preserved
+    const cleanLines = this.cleanSourceLines(lines);
 
     // 1. Extract non-main function definitions
     const functionDefs = this.extractFunctions(cleanLines);
@@ -582,7 +656,7 @@ export class ProgramSimulator {
         const cur = stmts[idx];
         const trimmed = cur.trimmed;
 
-        if (!trimmed || trimmed === '{' || trimmed === '}' || trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('using')) {
+        if (!trimmed || trimmed === '{' || trimmed === '}' || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('#') || trimmed.startsWith('using')) {
           idx++;
           continue;
         }
@@ -1561,15 +1635,15 @@ export class ProgramSimulator {
     // If no explicit main(), filter out function definitions and use top-level statements
     return lines.filter(l => {
       const t = l.trimmed;
-      return t && !t.startsWith('//') && !t.startsWith('#') && !t.startsWith('using');
+      return t && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*') && !t.startsWith('#') && !t.startsWith('using');
     });
   }
 
   private static extractBlockBody(
-    lines: { lineNum: number; raw: string; trimmed: string }[],
+    lines: { lineNum: number; raw: string; clean?: string; trimmed: string }[],
     startIdx: number
-  ): { bodyLines: { lineNum: number; raw: string; trimmed: string }[]; endLineIdx: number } {
-    const bodyLines: { lineNum: number; raw: string; trimmed: string }[] = [];
+  ): { bodyLines: { lineNum: number; raw: string; clean?: string; trimmed: string }[]; endLineIdx: number } {
+    const bodyLines: { lineNum: number; raw: string; clean?: string; trimmed: string }[] = [];
     let endLineIdx = startIdx;
 
     let i = startIdx + 1;
@@ -1589,14 +1663,32 @@ export class ProgramSimulator {
           braceCount = 1;
           i++;
           continue;
-        } else if (line.trimmed && !line.trimmed.startsWith('//')) {
+        } else if (line.trimmed && !line.trimmed.startsWith('//') && !line.trimmed.startsWith('/*') && !line.trimmed.startsWith('*')) {
           bodyLines.push(line);
           endLineIdx = i;
           return { bodyLines, endLineIdx };
         }
       } else {
         let hitClosing = false;
-        for (const char of line.trimmed) {
+        // Count braces ONLY outside of string literals using clean code without comments
+        const scanText = line.clean !== undefined ? line.clean : line.trimmed;
+        let inStr = false;
+        let strCh = '';
+        let esc = false;
+        for (let ci = 0; ci < scanText.length; ci++) {
+          const char = scanText[ci];
+          if (inStr) {
+            if (esc) esc = false;
+            else if (char === '\\') esc = true;
+            else if (char === strCh) inStr = false;
+            continue;
+          }
+          if (char === '"' || char === "'") {
+            inStr = true;
+            strCh = char;
+            esc = false;
+            continue;
+          }
           if (char === '}') {
             braceCount--;
             if (braceCount <= 0) {
@@ -1611,7 +1703,10 @@ export class ProgramSimulator {
         if (hitClosing) {
           break;
         }
-        bodyLines.push(line);
+        // Only include non-comment lines
+        if (line.trimmed && !line.trimmed.startsWith('//') && !line.trimmed.startsWith('/*') && !line.trimmed.startsWith('*')) {
+          bodyLines.push(line);
+        }
       }
       i++;
     }
