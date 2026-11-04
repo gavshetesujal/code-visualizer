@@ -86,7 +86,7 @@ export type StructureKind =
 
 export interface VisualStructure {
   id: string;
-  title?: string; // e.g. "Linked List (4 Nodes)", "Binary Search Tree", "Execution Call Stack"
+  title?: string;
   kind: StructureKind;
   blocks: VisualBlock[];
   connections?: VisualConnection[];
@@ -105,8 +105,9 @@ export interface ExecutionStep {
   variables: VariableState[];
   memoryDump: MemoryEntry[];
   output: string;
-  // Adaptive visual representations (can hold multiple structures e.g. Stack + Tree or Array + Pointers)
   visualStructures?: VisualStructure[];
+  isWaitingInput?: boolean;
+  inputPrompt?: string;
 }
 
 export interface SessionData {
@@ -125,8 +126,11 @@ export type WebviewToExtensionMessage =
   | { type: 'pause' }
   | { type: 'restart' }
   | { type: 'speedChange'; speed: number }
-  | { type: 'selectNode'; nodeId: string; line?: number };
+  | { type: 'selectNode'; nodeId: string; line?: number }
+  | { type: 'terminalInput'; input: string };
 
 export type ExtensionToWebviewMessage =
   | { type: 'init'; session: SessionData }
-  | { type: 'setStep'; stepIndex: number };
+  | { type: 'setStep'; stepIndex: number }
+  | { type: 'terminalOutput'; text: string }
+  | { type: 'terminalWaitInput'; prompt: string };

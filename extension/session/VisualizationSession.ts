@@ -15,6 +15,7 @@ export class VisualizationSession {
   private history: ExecutionHistory;
   private sessionData: SessionData;
   private lineDecoration: vscode.TextEditorDecorationType;
+  private userInputsLog: string[] = [];
 
   private constructor(
     context: vscode.ExtensionContext,
@@ -77,15 +78,10 @@ export class VisualizationSession {
     const fileName = path.basename(editor.document.fileName);
     const langId = editor.document.languageId;
 
-    // Execute real user program using RealExecutionEngine
     let sessionData: SessionData;
     try {
-      vscode.window.showInformationMessage(`Code Visualizer: Executing and tracing ${fileName}...`);
       sessionData = await RealExecutionEngine.executeAndTrace(editor.document);
     } catch (err: any) {
-      vscode.window.showWarningMessage(
-        `Code Visualizer: Real tracer notice: ${err?.message || err}. Using prototype mode.`
-      );
       sessionData = MockDataGenerator.generateSession(
         fileName,
         editor.document.fileName,
@@ -112,7 +108,7 @@ export class VisualizationSession {
     });
 
     this.panel.webview.onDidReceiveMessage(
-      (msg: WebviewToExtensionMessage) => {
+      async (msg: WebviewToExtensionMessage) => {
         switch (msg.type) {
           case 'ready':
             this.syncEditorDecoration();
@@ -127,6 +123,7 @@ export class VisualizationSession {
             this.history.pause();
             break;
           case 'restart':
+            this.userInputsLog = [];
             this.history.restart();
             break;
           case 'speedChange':
@@ -136,6 +133,10 @@ export class VisualizationSession {
             if (msg.line) {
               this.highlightSpecificLine(msg.line);
             }
+            break;
+          case 'terminalInput':
+            // User submitted stdin in the integrated terminal
+            await this.handleTerminalInput(msg.input);
             break;
         }
       },
@@ -163,6 +164,37 @@ export class VisualizationSession {
     );
   }
 
+  /**
+   * Re-runs the execution tracer with the accumulated user inputs fed directly into stdin
+   */
+  private async handleTerminalInput(input: string) {
+    this.userInputsLog.push(input);
+
+    const doc = await vscode.workspace.openTextDocument(this.documentUri);
+    try {
+      const updatedSession = await RealExecutionEngine.executeAndTrace(doc, this.userInputsLog);
+      this.sessionData = updatedSession;
+      
+      this.history.dispose();
+      this.history = new ExecutionHistory(
+        this.sessionData.steps,
+        Math.max(0, this.sessionData.steps.length - 1)
+      );
+
+      this.panel.webview.postMessage({
+        type: 'init',
+        session: this.sessionData
+      });
+
+      this.syncEditorDecoration();
+    } catch (e: any) {
+      this.panel.webview.postMessage({
+        type: 'terminalOutput',
+        text: `\nExecution error: ${e.message}\n`
+      });
+    }
+  }
+
   private highlightSpecificLine(lineNumber: number) {
     const editors = vscode.window.visibleTextEditors.filter(
       e => e.document.uri.toString() === this.documentUri.toString()
@@ -185,7 +217,6 @@ export class VisualizationSession {
   public dispose() {
     this.history.dispose();
 
-    // Clear line decorations from all visible editors
     const editors = vscode.window.visibleTextEditors.filter(
       e => e.document.uri.toString() === this.documentUri.toString()
     );
