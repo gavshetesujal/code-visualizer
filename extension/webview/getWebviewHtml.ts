@@ -1004,18 +1004,98 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #94a3b8;
     }
 
-    /* FUNCTION CALL FRAME */
-    .func-frame-card {
-      background: rgba(13, 21, 39, 0.9);
-      border: 2px solid #8b5cf6;
-      border-radius: 18px;
-      padding: 20px 26px;
-      margin-bottom: 20px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(139, 92, 246, 0.25);
+    /* RECURSIVE CALL STACK & FUNCTION FRAMES */
+    .call-stack-container {
       display: flex;
       flex-direction: column;
       gap: 16px;
-      min-width: 480px;
+      width: 520px;
+      max-width: 95vw;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .call-stack-header {
+      background: rgba(15, 23, 42, 0.95);
+      border: 1.5px solid #8b5cf6;
+      border-radius: 12px;
+      padding: 12px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 8px 24px rgba(139, 92, 246, 0.2);
+    }
+
+    .call-stack-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #c084fc;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .stack-breadcrumb-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .stack-crumb {
+      color: #94a3b8;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .stack-crumb.is-active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      font-weight: 700;
+    }
+
+    .crumb-arrow {
+      color: #8b5cf6;
+      font-size: 10px;
+    }
+
+    .call-stack-frames-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .func-frame-card {
+      background: rgba(13, 21, 39, 0.92);
+      border: 2px solid #8b5cf6;
+      border-radius: 16px;
+      padding: 18px 22px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 24px rgba(139, 92, 246, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: all 0.25s ease;
+    }
+
+    .func-frame-card.is-waiting {
+      border-color: rgba(245, 158, 11, 0.45);
+      background: rgba(13, 21, 39, 0.75);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+      opacity: 0.88;
+    }
+
+    .func-frame-card.is-active-frame {
+      border-color: #38bdf8;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 28px rgba(56, 189, 248, 0.25);
+    }
+
+    .func-frame-card.is-returning-frame {
+      border-color: #10b981;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 28px rgba(16, 185, 129, 0.3);
     }
 
     .func-header {
@@ -1024,6 +1104,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       justify-content: space-between;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       padding-bottom: 10px;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     .func-title {
@@ -1036,6 +1118,35 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       gap: 8px;
     }
 
+    .frame-state-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .frame-state-badge.is-active {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid #38bdf8;
+    }
+
+    .frame-state-badge.is-waiting {
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      border: 1px solid #f59e0b;
+    }
+
+    .frame-state-badge.is-returning {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid #10b981;
+    }
+
     .func-depth-badge {
       background: rgba(139, 92, 246, 0.2);
       border: 1px solid #8b5cf6;
@@ -1044,6 +1155,20 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border-radius: 8px;
       font-size: 11px;
       font-weight: 600;
+    }
+
+    .func-calc-banner {
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid #6366f1;
+      color: #a5b4fc;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .func-return-banner {
@@ -1058,6 +1183,18 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+
+    .stack-connector-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: #8b5cf6;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      margin: -4px 0;
     }
 
     /* ARRAY MEMORY CELLS */
@@ -1598,11 +1735,14 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
         // Render Visual Structures
         nodesContainer.innerHTML = '';
-        if (step.loopGroup || step.belongsToGroupId || step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || step.functionFrame || (step.arrayStructures && step.arrayStructures.length > 0)) {
+        if (step.loopGroup || step.belongsToGroupId || step.callStackFrames || step.functionFrame || step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || (step.arrayStructures && step.arrayStructures.length > 0)) {
           if (step.loopGroup) {
             structureTypePill.textContent = 'Grouped Loop (' + step.loopGroup.totalGroupedIterations + ' iterations)';
           } else if (step.belongsToGroupId) {
             structureTypePill.textContent = 'Expanded Iteration ' + (step.iterationIndex !== undefined ? '#' + step.iterationIndex : '');
+          } else if (step.callStackFrames && step.callStackFrames.length > 0) {
+            const topF = step.callStackFrames[step.callStackFrames.length - 1];
+            structureTypePill.textContent = (step.callStackFrames.length > 1 ? 'Recursion: ' : 'Function: ') + topF.functionName + '() [Depth ' + step.callStackFrames.length + ']';
           } else if (step.functionFrame) {
             structureTypePill.textContent = 'Function: ' + step.functionFrame.functionName + '()';
           } else if (step.activeLoop || (step.activeLoops && step.activeLoops.length > 0)) {
@@ -1710,19 +1850,135 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         mainWrapper.appendChild(banner);
       }
 
-      // 2. Function Call Frame
-      if (step.functionFrame) {
+      // 2. Recursive Call Stack & Function Frames
+      if (step.callStackFrames && step.callStackFrames.length > 0) {
+        const frames = step.callStackFrames;
+        const stackWrapper = document.createElement('div');
+        stackWrapper.className = 'call-stack-container';
+
+        // Stack Header with Breadcrumb Trail
+        const stackHeader = document.createElement('div');
+        stackHeader.className = 'call-stack-header';
+        stackHeader.innerHTML = \`
+          <div class="call-stack-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            <span>RECURSIVE CALL STACK (Depth \${frames.length})</span>
+          </div>
+          <div class="stack-breadcrumb-row">
+            \${frames.map((f, i) => \`
+              <span class="stack-crumb \${i === frames.length - 1 ? 'is-active' : ''}">\${f.callSignature}</span>
+              \${i < frames.length - 1 ? '<span class="crumb-arrow">➔</span>' : ''}
+            \`).join('')}
+          </div>
+        \`;
+        stackWrapper.appendChild(stackHeader);
+
+        const framesList = document.createElement('div');
+        framesList.className = 'call-stack-frames-list';
+
+        // Render frames from top (innermost/active) to bottom (caller)
+        frames.slice().reverse().forEach((frame, rIdx) => {
+          const frameCard = document.createElement('div');
+          let stateClass = 'is-active-frame';
+          if (frame.state === 'waiting') stateClass = 'is-waiting';
+          else if (frame.state === 'returning') stateClass = 'is-returning-frame';
+
+          frameCard.className = \`func-frame-card \${stateClass}\`;
+
+          let stateBadgeHtml = '';
+          if (frame.state === 'active') {
+            stateBadgeHtml = '<span class="frame-state-badge is-active">● ACTIVE</span>';
+          } else if (frame.state === 'waiting') {
+            stateBadgeHtml = \`<span class="frame-state-badge is-waiting">⏳ WAITING for \${frame.waitingForCallSignature || 'child call'}</span>\`;
+          } else if (frame.state === 'returning') {
+            stateBadgeHtml = '<span class="frame-state-badge is-returning">✓ RETURNING</span>';
+          }
+
+          frameCard.innerHTML = \`
+            <div class="func-header">
+              <div class="func-title">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                <span>Frame: <strong>\${frame.callSignature}</strong></span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                \${stateBadgeHtml}
+                <span class="func-depth-badge">Depth \${frame.callDepth}</span>
+              </div>
+            </div>
+
+            \${frame.calculationDetails ? \`
+              <div class="func-calc-banner">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
+                <span>\${frame.calculationDetails}</span>
+              </div>
+            \` : ''}
+
+            \${frame.returnValue !== undefined && frame.state === 'returning' ? \`
+              <div class="func-return-banner">
+                <span>✓ Return Value:</span>
+                <strong>\${frame.returnValue}</strong>
+                <span style="font-size:11px; font-weight:normal; color:#a7f3d0; margin-left:6px;">➔ to \${frame.callerFunctionName || 'caller'}</span>
+              </div>
+            \` : ''}
+
+            <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters:</div>
+            <div class="buckets-grid" style="padding: 4px 0;">
+              \${frame.parameters.map(p => \`
+                <div class="var-bucket is-modified">
+                  <span class="bucket-name-tag">\${p.name}</span>
+                  <div class="bucket-value-container">
+                    <div class="bucket-current-val value-enter">\${p.value}</div>
+                  </div>
+                </div>
+              \`).join('')}
+            </div>
+
+            \${frame.localVariables && frame.localVariables.length > 0 ? \`
+              <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px; margin-top:6px;">Local Variables:</div>
+              <div class="buckets-grid" style="padding: 4px 0;">
+                \${frame.localVariables.map(l => \`
+                  <div class="var-bucket \${l.isModified ? 'is-modified' : ''}">
+                    <span class="bucket-name-tag">\${l.name}</span>
+                    <div class="bucket-value-container">
+                      <div class="bucket-current-val \${l.isModified ? 'value-enter' : ''}">\${l.value}</div>
+                    </div>
+                  </div>
+                \`).join('')}
+              </div>
+            \` : ''}
+          \`;
+
+          framesList.appendChild(frameCard);
+
+          if (rIdx < frames.length - 1) {
+            const connector = document.createElement('div');
+            connector.className = 'stack-connector-indicator';
+            connector.innerHTML = '<span>▲ returns to caller</span>';
+            framesList.appendChild(connector);
+          }
+        });
+
+        stackWrapper.appendChild(framesList);
+        mainWrapper.appendChild(stackWrapper);
+      } else if (step.functionFrame) {
         const ff = step.functionFrame;
         const frameCard = document.createElement('div');
-        frameCard.className = 'func-frame-card';
+        frameCard.className = 'func-frame-card is-active-frame';
         frameCard.innerHTML = \`
           <div class="func-header">
             <div class="func-title">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
               <span>Function Frame: <strong>\${ff.callSignature}</strong></span>
             </div>
-            <span class="func-depth-badge">Call Depth \${ff.callDepth}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="func-depth-badge">Call Depth \${ff.callDepth}</span>
+            </div>
           </div>
+          \${ff.calculationDetails ? \`
+            <div class="func-calc-banner">
+              <span>\${ff.calculationDetails}</span>
+            </div>
+          \` : ''}
           \${ff.returnValue !== undefined ? \`<div class="func-return-banner"><span>✓ Return Value:</span><strong>\${ff.returnValue}</strong></div>\` : ''}
           <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters:</div>
           <div class="buckets-grid" style="padding: 10px 0;">
@@ -1735,6 +1991,19 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
               </div>
             \`).join('')}
           </div>
+          \${ff.localVariables && ff.localVariables.length > 0 ? \`
+            <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px; margin-top:6px;">Local Variables:</div>
+            <div class="buckets-grid" style="padding: 4px 0;">
+              \${ff.localVariables.map(l => \`
+                <div class="var-bucket \${l.isModified ? 'is-modified' : ''}">
+                  <span class="bucket-name-tag">\${l.name}</span>
+                  <div class="bucket-value-container">
+                    <div class="bucket-current-val \${l.isModified ? 'value-enter' : ''}">\${l.value}</div>
+                  </div>
+                </div>
+              \`).join('')}
+            </div>
+          \` : ''}
         \`;
         mainWrapper.appendChild(frameCard);
       }

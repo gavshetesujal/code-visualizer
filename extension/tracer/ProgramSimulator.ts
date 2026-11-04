@@ -32,7 +32,7 @@ export class ProgramSimulator {
     const hasCin = /\bcin\s*>>/.test(code);
     const hasIf = /\bif\s*\(/.test(code);
     const hasAssign = /[a-zA-Z_]\w*\s*=\s*[^=]/.test(code);
-    const hasFunc = /\b(int|void|float|double|char|string|bool)\s+[a-zA-Z_]\w*\s*\([^)]*\)\s*\{/.test(code);
+    const hasFunc = /\b(int|void|float|double|char|string|bool)\s+[a-zA-Z_]\w*\s*\([^)]*\)/.test(code);
     return hasVarDecl || hasLoop || hasCin || hasIf || hasAssign || hasFunc;
   }
 
@@ -185,7 +185,9 @@ export class ProgramSimulator {
 
     // Active Loop Stack for nested loops
     const activeLoopStack: LoopContainerState[] = [];
-    let currentFunctionFrame: FunctionCallFrame | undefined = undefined;
+    const activeFrameStack: FunctionCallFrame[] = [];
+    let callCounter = 0;
+    const MAX_RECURSION_DEPTH = 100;
 
     const makeBucketsSnapshot = (modifiedName?: string): VariableBucket[] => {
       return varOrder.map(name => {
@@ -239,15 +241,22 @@ export class ProgramSimulator {
       } = {}
     ) => {
       const stepIdx = steps.length;
+      const topFrame = opts.funcFrame || (activeFrameStack.length > 0 ? activeFrameStack[activeFrameStack.length - 1] : undefined);
       steps.push({
         stepIndex: stepIdx,
         totalSteps: 0,
         line,
         statement: stmt,
         explanation,
-        callStack: [{
+        callStack: activeFrameStack.length > 0 ? activeFrameStack.map((f, i) => ({
+          id: i + 1,
+          name: f.callSignature,
+          file: fileName,
+          line,
+          variables: []
+        })) : [{
           id: 1,
-          name: currentFunctionFrame ? `${currentFunctionFrame.functionName}()` : 'main()',
+          name: 'main()',
           file: fileName,
           line,
           variables: []
@@ -261,20 +270,314 @@ export class ProgramSimulator {
         activeLoops: makeLoopsSnapshot(),
         inputRequest: opts.inputReq,
         conditionEvent: opts.condEvent,
-        functionFrame: opts.funcFrame ? JSON.parse(JSON.stringify(opts.funcFrame)) : undefined,
+        functionFrame: topFrame ? JSON.parse(JSON.stringify(topFrame)) : undefined,
+        callStackFrames: activeFrameStack.length > 0 ? JSON.parse(JSON.stringify(activeFrameStack)) : undefined,
         arrayStructures: makeArraysSnapshot()
       });
+    };
+
+    // Helper: Substitute variables and array lookups in an expression
+    const substituteVariables = (expr: string, frame?: FunctionCallFrame): string => {
+      let exp = expr.trim();
+
+      // 1. Resolve array cell access: arr[i], arr[0], etc.
+      exp = exp.replace(/([a-zA-Z_]\w*)\s*\[\s*([^\]]+)\s*\]/g, (match, arrName, idxExpr) => {
+        if (arrayMap.has(arrName)) {
+          const evalIdxStr = evaluateMathExpr(substituteVariables(idxExpr, frame));
+          const idx = parseInt(evalIdxStr, 10);
+          const arr = arrayMap.get(arrName)!;
+          if (idx >= 0 && idx < arr.cells.length) {
+            return arr.cells[idx].value;
+          }
+        }
+        return match;
+      });
+
+      // 2. Substitute frame-specific variables (local variables and parameters)
+      if (frame) {
+        frame.localVariables.forEach(v => {
+          exp = exp.replace(new RegExp(`\\b${v.name}\\b`, 'g'), v.value || '0');
+        });
+        frame.parameters.forEach(p => {
+          exp = exp.replace(new RegExp(`\\b${p.name}\\b`, 'g'), p.value || '0');
+        });
+      }
+
+      // 3. Substitute global / main variables
+      varMap.forEach((v, k) => {
+        const simpleName = k.includes(':') ? k.split(':')[1] : k;
+        exp = exp.replace(new RegExp(`\\b${simpleName}\\b`, 'g'), v.value || '0');
+      });
+
+      return exp;
+    };
+
+    // Helper: Pure arithmetic expression evaluation
+    const evaluateMathExpr = (exp: string): string => {
+      const cleaned = exp.trim();
+      if (!cleaned) return '0';
+      if (cleaned.startsWith('"') && cleaned.endsWith('"')) return cleaned.slice(1, -1);
+      if (cleaned.startsWith("'") && cleaned.endsWith("'")) return cleaned.slice(1, -1);
+      if (/^-?\d+(\.\d+)?$/.test(cleaned)) return cleaned;
+      if (cleaned === 'true') return 'true';
+      if (cleaned === 'false') return 'false';
+
+      try {
+        const res = Function(`"use strict"; return (${cleaned});`)();
+        return String(res);
+      } catch (e) {
+        return cleaned;
+      }
+    };
+
+    // Helper: Evaluate expressions that may contain function calls (e.g. n * factorial(n - 1) or fib(n-1) + fib(n-2))
+    const evalExpressionWithCalls = (rawExpr: string, frame?: FunctionCallFrame): string => {
+      let expr = rawExpr.trim();
+
+      const callRegex = /\b([a-zA-Z_]\w*)\s*\(([^()]*)\)/;
+      let match = expr.match(callRegex);
+
+      let guard = 0;
+      while (match && guard < 100) {
+        guard++;
+        const funcName = match[1];
+        const rawArgStr = match[2];
+
+        if (functionDefs.has(funcName)) {
+          const argParts = rawArgStr ? rawArgStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+          const evaluatedArgs: string[] = [];
+
+          for (const argPart of argParts) {
+            evaluatedArgs.push(evalExpressionWithCalls(argPart, frame));
+          }
+
+          if (frame) {
+            frame.state = 'waiting';
+            frame.waitingForCallSignature = `${funcName}(${evaluatedArgs.join(', ')})`;
+          }
+
+          const retVal = executeFunction(funcName, evaluatedArgs, undefined, frame);
+
+          if (frame) {
+            frame.state = 'active';
+            frame.waitingForCallSignature = undefined;
+          }
+
+          expr = expr.slice(0, match.index!) + retVal + expr.slice(match.index! + match[0].length);
+          match = expr.match(callRegex);
+        } else {
+          break;
+        }
+      }
+
+      const substituted = substituteVariables(expr, frame);
+      return evaluateMathExpr(substituted);
+    };
+
+    // Helper: Execute a function call
+    const executeFunction = (
+      funcName: string,
+      evaluatedArgs: string[],
+      assignVar?: string,
+      callerFrame?: FunctionCallFrame
+    ): string => {
+      const targetFunc = functionDefs.get(funcName);
+      if (!targetFunc) {
+        return '0';
+      }
+
+      callCounter++;
+      const frameId = `call_${funcName}_${callCounter}`;
+      const callDepth = activeFrameStack.length + 1;
+
+      if (callDepth > MAX_RECURSION_DEPTH) {
+        recordStep(
+          targetFunc.startLine,
+          `${funcName}(${evaluatedArgs.join(', ')})`,
+          `Execution safeguard: Maximum recursion depth (${MAX_RECURSION_DEPTH}) reached to prevent stack overflow.`
+        );
+        return '0';
+      }
+
+      // Bind parameters
+      const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => {
+        const val = evaluatedArgs[i] !== undefined ? evaluatedArgs[i] : '0';
+        return {
+          name: p.name,
+          value: val,
+          type: p.type,
+          scope: frameId,
+          isNew: true
+        };
+      });
+
+      const frame: FunctionCallFrame = {
+        id: frameId,
+        functionName: funcName,
+        callSignature: `${funcName}(${evaluatedArgs.join(', ')})`,
+        parameters: paramBuckets,
+        localVariables: [],
+        callDepth,
+        state: 'created',
+        callerFrameId: callerFrame?.id,
+        callerFunctionName: callerFrame ? callerFrame.callSignature : 'main()'
+      };
+
+      if (callerFrame) {
+        callerFrame.state = 'waiting';
+        callerFrame.waitingForCallSignature = frame.callSignature;
+      }
+
+      activeFrameStack.push(frame);
+      frame.state = 'active';
+
+      // Record function entry step
+      recordStep(
+        targetFunc.startLine,
+        `${targetFunc.returnType} ${funcName}(${targetFunc.params.map((p, i) => `${p.type} ${p.name} = ${evaluatedArgs[i] || '0'}`).join(', ')})`,
+        `Function call: entering '${funcName}()' (depth ${callDepth}) with arguments (${evaluatedArgs.join(', ')}).${callerFrame ? ` Caller '${callerFrame.functionName}' is waiting.` : ''}`,
+        { funcFrame: frame }
+      );
+
+      // Execute function body
+      let funcReturnValue = '0';
+      let hasExplicitReturn = false;
+
+      const result = executeStatements(targetFunc.bodyLines, frameId, frame);
+      if (result && result.hasReturned) {
+        hasExplicitReturn = true;
+        funcReturnValue = result.returnValue !== undefined ? result.returnValue : '0';
+      }
+
+      if (isWaitingForInput) {
+        return funcReturnValue;
+      }
+
+      if (!hasExplicitReturn && targetFunc.returnType === 'void') {
+        funcReturnValue = '';
+      }
+
+      // Return transition
+      frame.state = 'returning';
+      frame.returnValue = funcReturnValue;
+      frame.isReturning = true;
+
+      recordStep(
+        targetFunc.startLine,
+        targetFunc.returnType === 'void' ? `return;` : `return ${funcReturnValue};`,
+        `Function '${frame.callSignature}' finished: returned ${funcReturnValue ? funcReturnValue : 'void'} to ${callerFrame ? callerFrame.callSignature : 'main()'}.`,
+        { funcFrame: frame }
+      );
+
+      // Pop frame (completed)
+      frame.state = 'completed';
+      activeFrameStack.pop();
+
+      // Resume caller
+      if (callerFrame) {
+        callerFrame.state = 'active';
+        callerFrame.waitingForCallSignature = undefined;
+      }
+
+      // If assigned to variable
+      if (assignVar) {
+        if (callerFrame) {
+          let b = callerFrame.localVariables.find(v => v.name === assignVar);
+          if (!b) {
+            b = { name: assignVar, value: '', scope: callerFrame.id };
+            callerFrame.localVariables.push(b);
+          }
+          b.previousValue = b.value;
+          b.value = funcReturnValue;
+          b.isModified = true;
+          b.isEmpty = false;
+        } else {
+          if (!varMap.has(assignVar)) {
+            varOrder.push(assignVar);
+            varMap.set(assignVar, { name: assignVar, value: '', scope: 'main' });
+          }
+          const b = varMap.get(assignVar)!;
+          b.previousValue = b.value;
+          b.value = funcReturnValue;
+          b.isModified = true;
+          b.isEmpty = false;
+        }
+
+        recordStep(
+          targetFunc.startLine,
+          `${assignVar} = ${funcReturnValue};`,
+          `Stored returned value ${funcReturnValue} into '${assignVar}'.`,
+          { modifiedVar: callerFrame ? undefined : assignVar, funcFrame: callerFrame }
+        );
+      }
+
+      return funcReturnValue;
+    };
+
+    const evalGeneralCondition = (cond: string, frame?: FunctionCallFrame): boolean => {
+      try {
+        const val = evalExpressionWithCalls(cond, frame);
+        return val === 'true' || val === '1' || (parseFloat(val) !== 0 && !isNaN(parseFloat(val)) && val !== 'false');
+      } catch (e) {
+        return false;
+      }
+    };
+
+    const evalCout = (stmt: string, frame?: FunctionCallFrame): string => {
+      const cleaned = stmt.replace(/^cout\s*<<\s*/, '').replace(/;$/, '');
+      const tokens = cleaned.split('<<').map(t => t.trim());
+      let out = '';
+
+      for (const tok of tokens) {
+        if (tok === 'endl') {
+          out += '\n';
+        } else if (tok.startsWith('"') && tok.endsWith('"')) {
+          out += tok.slice(1, -1);
+        } else if (tok.startsWith("'") && tok.endsWith("'")) {
+          out += tok.slice(1, -1);
+        } else {
+          try {
+            const val = evalExpressionWithCalls(tok, frame);
+            out += val;
+          } catch (e) {
+            out += tok;
+          }
+        }
+      }
+
+      return out;
+    };
+
+    const splitTopLevelCommas = (str: string): string[] => {
+      const parts: string[] = [];
+      let current = '';
+      let parenDepth = 0;
+      for (const ch of str) {
+        if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth--;
+        if (ch === ',' && parenDepth === 0) {
+          parts.push(current.trim());
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      if (current.trim()) {
+        parts.push(current.trim());
+      }
+      return parts;
     };
 
     // Statement Execution Engine
     const executeStatements = (
       stmts: { lineNum: number; raw: string; trimmed: string }[],
-      scopeName: string
-    ) => {
+      scopeName: string,
+      currentFrame?: FunctionCallFrame
+    ): { hasReturned: boolean; returnValue?: string } => {
       let idx = 0;
       while (idx < stmts.length) {
         if (isWaitingForInput) {
-          return;
+          return { hasReturned: false };
         }
         const cur = stmts[idx];
         const trimmed = cur.trimmed;
@@ -284,17 +587,29 @@ export class ProgramSimulator {
           continue;
         }
 
-        // Return statement
+        // Return statement (supports recursive calls like return n * factorial(n - 1);)
         if (trimmed.startsWith('return')) {
           const retMatch = trimmed.match(/^return\s*(.*?);?$/);
-          const retExpr = retMatch ? retMatch[1].trim() : '';
+          const retRawExpr = retMatch ? retMatch[1].trim() : '';
           let retVal = '';
-          if (retExpr && retExpr !== '0') {
-            retVal = this.evaluateExpression(retExpr, '=', '', varMap);
+
+          if (retRawExpr && retRawExpr !== 'void') {
+            retVal = evalExpressionWithCalls(retRawExpr, currentFrame);
+
+            if (currentFrame && (retRawExpr.includes('*') || retRawExpr.includes('+') || retRawExpr.includes('-') || retRawExpr.includes('/'))) {
+              const substituted = substituteVariables(retRawExpr, currentFrame);
+              currentFrame.calculationDetails = `Calculated: ${substituted} = ${retVal}`;
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `Calculated return value in '${currentFrame.callSignature}': ${retRawExpr} ➔ ${retVal}.`,
+                { funcFrame: currentFrame }
+              );
+            }
           }
-          recordStep(cur.lineNum, trimmed, `Return from ${scopeName} ${retVal ? `with value ${retVal}` : ''}.`);
+
           idx++;
-          break;
+          return { hasReturned: true, returnValue: retVal };
         }
 
         // 1. FOR LOOP (supports nested for loops)
@@ -673,12 +988,24 @@ export class ProgramSimulator {
 
         // 4. IF / ELSE IF / ELSE BRANCHING
         if (trimmed.startsWith('if')) {
-          const ifMatch = trimmed.match(/^if\s*\(\s*(.*?)\s*\)/);
+          const ifMatch = trimmed.match(/^if\s*\(\s*(.*?)\s*\)(?:\s*(.+))?$/);
           if (ifMatch) {
             const condPart = ifMatch[1];
-            const condPassed = this.evalGeneralCondition(condPart, varMap);
+            const inlineStmt = ifMatch[2] ? ifMatch[2].trim() : '';
+            const condPassed = evalGeneralCondition(condPart, currentFrame);
 
-            const { bodyLines: ifBody, endLineIdx: ifEnd } = this.extractBlockBody(stmts, idx);
+            let ifBody: { lineNum: number; raw: string; trimmed: string }[] = [];
+            let ifEnd = idx;
+
+            if (inlineStmt && !inlineStmt.startsWith('{')) {
+              // Single-line if (e.g. if (n <= 1) return 1;)
+              ifBody = [{ lineNum: cur.lineNum, raw: inlineStmt, trimmed: inlineStmt }];
+              ifEnd = idx;
+            } else {
+              const extracted = this.extractBlockBody(stmts, idx);
+              ifBody = extracted.bodyLines;
+              ifEnd = extracted.endLineIdx;
+            }
 
             // Check if followed by else / else if (e.g. "} else {" or "else {")
             let elseBody: { lineNum: number; raw: string; trimmed: string }[] | null = null;
@@ -697,7 +1024,7 @@ export class ProgramSimulator {
                 const elseIfMatch = elseLine.match(/else\s+if\s*\(\s*(.*?)\s*\)/);
                 if (elseIfMatch) {
                   elseIfCond = elseIfMatch[1];
-                  elseIfPassed = !condPassed && this.evalGeneralCondition(elseIfCond, varMap);
+                  elseIfPassed = !condPassed && evalGeneralCondition(elseIfCond, currentFrame);
                   const { bodyLines, endLineIdx } = this.extractBlockBody(stmts, elseIdx);
                   elseIfBody = bodyLines;
                   idx = endLineIdx + 1;
@@ -722,14 +1049,21 @@ export class ProgramSimulator {
                   evaluatedResult: condPassed,
                   branchTaken: condPassed ? 'if' : (elseBody ? 'else' : 'skipped'),
                   explanation: condPassed ? 'Condition is TRUE' : 'Condition is FALSE'
-                }
+                },
+                funcFrame: currentFrame
               }
             );
 
             if (condPassed) {
-              executeStatements(ifBody, `${scopeName}_if`);
+              const res = executeStatements(ifBody, `${scopeName}_if`, currentFrame);
+              if (res && res.hasReturned) {
+                return res;
+              }
             } else if (elseIfBody && elseIfPassed) {
-              executeStatements(elseIfBody, `${scopeName}_elseif`);
+              const res = executeStatements(elseIfBody, `${scopeName}_elseif`, currentFrame);
+              if (res && res.hasReturned) {
+                return res;
+              }
             } else if (elseBody) {
               recordStep(
                 stmts[idx - 1] ? stmts[idx - 1].lineNum : cur.lineNum,
@@ -741,14 +1075,18 @@ export class ProgramSimulator {
                     evaluatedResult: true,
                     branchTaken: 'else',
                     explanation: 'Executing ELSE branch'
-                  }
+                  },
+                  funcFrame: currentFrame
                 }
               );
-              executeStatements(elseBody, `${scopeName}_else`);
+              const res = executeStatements(elseBody, `${scopeName}_else`, currentFrame);
+              if (res && res.hasReturned) {
+                return res;
+              }
             }
 
             if (isWaitingForInput) {
-              return;
+              return { hasReturned: false };
             }
 
             continue;
@@ -835,118 +1173,26 @@ export class ProgramSimulator {
           }
 
           if (isWaitingForInput) {
-            return;
+            return { hasReturned: false };
           }
 
           idx++;
           continue;
         }
 
-        // 6. FUNCTION CALL STATEMENT (e.g. int answer = add(x, y); or answer = add(x, y); or printMessage();)
-        const funcCallMatch = trimmed.match(/^(?:(?:int|float|double|char|string|bool|long|short|void|auto)\s+)?(?:([a-zA-Z_]\w*)\s*=\s*)?([a-zA-Z_]\w*)\s*\((.*?)\)\s*;$/);
-        if (funcCallMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin') && !trimmed.startsWith('for') && !trimmed.startsWith('while') && !trimmed.startsWith('if')) {
-          const assignVar = funcCallMatch[1];
-          const funcName = funcCallMatch[2];
-          const argList = funcCallMatch[3].split(',').map(a => a.trim()).filter(Boolean);
-
-          const targetFunc = functionDefs.get(funcName);
-          if (targetFunc) {
-            // Evaluate arguments
-            const evalArgs = argList.map(a => this.evaluateExpression(a, '=', '', varMap));
-
-            // Create function call frame
-            const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => ({
-              name: p.name,
-              value: evalArgs[i] || '0',
-              type: p.type,
-              scope: funcName,
-              isNew: true
-            }));
-
-            const frame: FunctionCallFrame = {
-              id: `call_${funcName}_${cur.lineNum}`,
-              functionName: funcName,
-              callSignature: `${funcName}(${evalArgs.join(', ')})`,
-              parameters: paramBuckets,
-              localVariables: [],
-              callDepth: (currentFunctionFrame ? currentFunctionFrame.callDepth + 1 : 1)
-            };
-
-            currentFunctionFrame = frame;
-
-            // Step: Function call transition
-            recordStep(
-              cur.lineNum,
-              trimmed,
-              `Function call: entering '${funcName}()' with arguments (${evalArgs.join(', ')}).`,
-              { funcFrame: frame }
-            );
-
-            // Add parameters into variable map under function scope
-            paramBuckets.forEach(p => {
-              const key = `${funcName}:${p.name}`;
-              varMap.set(key, p);
-              if (!varOrder.includes(key)) varOrder.push(key);
-            });
-
-            // Execute function body lines
-            executeStatements(targetFunc.bodyLines, funcName);
-            if (isWaitingForInput) {
-              return;
-            }
-
-            // Determine return value
-            let retVal = '0';
-            for (const bl of targetFunc.bodyLines) {
-              if (bl.trimmed.startsWith('return')) {
-                const rm = bl.trimmed.match(/^return\s*(.*?);?$/);
-                if (rm && rm[1]) {
-                  retVal = this.evaluateExpression(rm[1], '=', '', varMap);
-                }
-              }
-            }
-
-            frame.returnValue = retVal;
-            frame.isReturning = true;
-
-            // Step: Return transition
-            recordStep(
-              cur.lineNum,
-              `return ${retVal};`,
-              `Function '${funcName}()' finished: returned ${retVal} to caller.`,
-              { funcFrame: frame }
-            );
-
-            // Clean up function scope variables
-            paramBuckets.forEach(p => {
-              const key = `${funcName}:${p.name}`;
-              p.isOutOfScope = true;
-            });
-
-            // Store return value if assigned
-            if (assignVar) {
-              if (!varMap.has(assignVar)) {
-                varOrder.push(assignVar);
-                varMap.set(assignVar, { name: assignVar, value: '', scope: scopeName });
-              }
-              const b = varMap.get(assignVar)!;
-              b.previousValue = b.value;
-              b.value = retVal;
-              b.isModified = true;
-              b.isEmpty = false;
-
-              recordStep(
-                cur.lineNum,
-                `${assignVar} = ${retVal};`,
-                `Stored returned value ${retVal} into '${assignVar}'.`,
-                { modifiedVar: assignVar }
-              );
-            }
-
-            currentFunctionFrame = undefined;
-            idx++;
-            continue;
+        // 6. STANDALONE FUNCTION CALL STATEMENT (e.g. countdown(n - 1); or print(x);)
+        const standaloneCallMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*\((.*?)\)\s*;$/);
+        if (standaloneCallMatch && functionDefs.has(standaloneCallMatch[1])) {
+          const funcName = standaloneCallMatch[1];
+          const rawArgStr = standaloneCallMatch[2];
+          const argParts = rawArgStr ? rawArgStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+          const evaluatedArgs: string[] = [];
+          for (const argPart of argParts) {
+            evaluatedArgs.push(evalExpressionWithCalls(argPart, currentFrame));
           }
+          executeFunction(funcName, evaluatedArgs, undefined, currentFrame);
+          idx++;
+          continue;
         }
 
         // 7. ARRAY DECLARATION (e.g. int arr[4] = {10, 20, 30, 40}; or int nums[3];)
@@ -1045,51 +1291,81 @@ export class ProgramSimulator {
           continue;
         }
 
-        // 10. VARIABLE DECLARATION (e.g. int a = 10; float marks = 85.5; char grade = 'A'; int age;)
-        const declMatch = trimmed.match(/^(?:const\s+)?(int|float|double|char|string|bool|long|short)\s+(.+?);$/);
-        if (declMatch && !trimmed.includes('(')) {
+        // 10. VARIABLE DECLARATION (e.g. int answer = factorial(4); int a = 10; float marks = 85.5;)
+        const declMatch = trimmed.match(/^(?:const\s+)?(int|float|double|char|string|bool|long|short|auto)\s+(.+?);$/);
+        if (declMatch && !trimmed.includes(') {') && !trimmed.match(/\)\s*\{?$/)) {
           const varType = declMatch[1];
-          const varDefs = declMatch[2].split(',');
+          const varDefs = splitTopLevelCommas(declMatch[2]);
           for (const def of varDefs) {
-            const parts = def.trim().split('=');
-            const varName = parts[0].trim();
-            let initVal = parts.length > 1 ? parts[1].trim() : '';
+            const eqIdx = def.indexOf('=');
+            const varName = (eqIdx !== -1 ? def.slice(0, eqIdx) : def).trim();
+            let initVal = eqIdx !== -1 ? def.slice(eqIdx + 1).trim() : '';
 
-            // Evaluate expression if initial value is provided
+            // Evaluate expression with potential function calls!
             if (initVal) {
-              initVal = this.evaluateExpression(initVal, '=', '', varMap);
+              initVal = evalExpressionWithCalls(initVal, currentFrame);
             }
 
             const isUninitialized = !initVal;
-            if (varMap.has(varName)) {
-              const existing = varMap.get(varName)!;
-              if (initVal) {
-                existing.previousValue = existing.value;
-                existing.value = initVal;
-                existing.isEmpty = false;
-                existing.isModified = true;
+            if (currentFrame) {
+              let existing = currentFrame.localVariables.find(v => v.name === varName);
+              if (existing) {
+                if (initVal) {
+                  existing.previousValue = existing.value;
+                  existing.value = initVal;
+                  existing.isEmpty = false;
+                  existing.isModified = true;
+                }
+              } else {
+                currentFrame.localVariables.push({
+                  name: varName,
+                  value: initVal,
+                  type: varType,
+                  isEmpty: isUninitialized,
+                  isNew: true,
+                  scope: currentFrame.id
+                });
               }
-              // If uninitialized, preserve existing bucket and previousValue so loop iterations don't wipe out value history
-            } else {
-              varOrder.push(varName);
-              varMap.set(varName, {
-                name: varName,
-                value: initVal,
-                type: varType,
-                isEmpty: isUninitialized,
-                isNew: true,
-                scope: scopeName
-              });
-            }
 
-            recordStep(
-              cur.lineNum,
-              trimmed,
-              isUninitialized
-                ? `Created empty bucket for variable '${varName}' (uninitialized, waiting for value).`
-                : `Created bucket for variable '${varName}' with value ${initVal}.`,
-              { modifiedVar: varName }
-            );
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                isUninitialized
+                  ? `In '${currentFrame.callSignature}': created empty local variable '${varName}'.`
+                  : `In '${currentFrame.callSignature}': created local variable '${varName}' with value ${initVal}.`,
+                { funcFrame: currentFrame }
+              );
+            } else {
+              // Main scope
+              if (varMap.has(varName)) {
+                const existing = varMap.get(varName)!;
+                if (initVal) {
+                  existing.previousValue = existing.value;
+                  existing.value = initVal;
+                  existing.isEmpty = false;
+                  existing.isModified = true;
+                }
+              } else {
+                varOrder.push(varName);
+                varMap.set(varName, {
+                  name: varName,
+                  value: initVal,
+                  type: varType,
+                  isEmpty: isUninitialized,
+                  isNew: true,
+                  scope: scopeName
+                });
+              }
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                isUninitialized
+                  ? `Created empty bucket for variable '${varName}' (uninitialized, waiting for value).`
+                  : `Created bucket for variable '${varName}' with value ${initVal}.`,
+                { modifiedVar: varName }
+              );
+            }
           }
 
           idx++;
@@ -1101,20 +1377,27 @@ export class ProgramSimulator {
         if (incDecMatch && (incDecMatch[1] || incDecMatch[3])) {
           const varName = incDecMatch[2];
           const isInc = (incDecMatch[1] === '++' || incDecMatch[3] === '++');
-          if (varMap.has(varName)) {
-            const b = varMap.get(varName)!;
-            const oldValNum = parseFloat(b.value || '0');
+          let targetBucket: VariableBucket | undefined = undefined;
+          if (currentFrame) {
+            targetBucket = currentFrame.localVariables.find(v => v.name === varName) || currentFrame.parameters.find(p => p.name === varName);
+          }
+          if (!targetBucket && varMap.has(varName)) {
+            targetBucket = varMap.get(varName);
+          }
+
+          if (targetBucket) {
+            const oldValNum = parseFloat(targetBucket.value || '0');
             const newValNum = isInc ? oldValNum + 1 : oldValNum - 1;
-            b.previousValue = b.value;
-            b.value = String(newValNum);
-            b.isModified = true;
-            b.isEmpty = false;
+            targetBucket.previousValue = targetBucket.value;
+            targetBucket.value = String(newValNum);
+            targetBucket.isModified = true;
+            targetBucket.isEmpty = false;
 
             recordStep(
               cur.lineNum,
               trimmed,
-              `${isInc ? 'Incremented' : 'Decremented'} '${varName}' from ${b.previousValue} to ${b.value}.`,
-              { modifiedVar: varName }
+              `${isInc ? 'Incremented' : 'Decremented'} '${varName}' from ${targetBucket.previousValue} to ${targetBucket.value}.`,
+              { modifiedVar: currentFrame ? undefined : varName, funcFrame: currentFrame }
             );
             idx++;
             continue;
@@ -1128,21 +1411,34 @@ export class ProgramSimulator {
           const op = assignMatch[2];
           const expr = assignMatch[3].trim();
 
-          if (varMap.has(varName)) {
-            const b = varMap.get(varName)!;
-            const oldVal = b.value;
-            const newVal = this.evaluateExpression(expr, op, oldVal, varMap);
+          let targetBucket: VariableBucket | undefined = undefined;
+          if (currentFrame) {
+            targetBucket = currentFrame.localVariables.find(v => v.name === varName) || currentFrame.parameters.find(p => p.name === varName);
+          }
+          if (!targetBucket && varMap.has(varName)) {
+            targetBucket = varMap.get(varName);
+          }
 
-            b.previousValue = oldVal;
-            b.value = newVal;
-            b.isModified = true;
-            b.isEmpty = false;
+          if (targetBucket) {
+            const oldVal = targetBucket.value;
+            let newVal = evalExpressionWithCalls(expr, currentFrame);
+
+            if (op === '+=') newVal = String(parseFloat(oldVal || '0') + parseFloat(newVal));
+            else if (op === '-=') newVal = String(parseFloat(oldVal || '0') - parseFloat(newVal));
+            else if (op === '*=') newVal = String(parseFloat(oldVal || '0') * parseFloat(newVal));
+            else if (op === '/=') newVal = String(parseFloat(oldVal || '0') / (parseFloat(newVal) || 1));
+            else if (op === '%=') newVal = String(parseFloat(oldVal || '0') % (parseFloat(newVal) || 1));
+
+            targetBucket.previousValue = oldVal;
+            targetBucket.value = newVal;
+            targetBucket.isModified = true;
+            targetBucket.isEmpty = false;
 
             recordStep(
               cur.lineNum,
               trimmed,
               `Updated variable '${varName}': previous value '${oldVal}' moves out, new value '${newVal}' enters.`,
-              { modifiedVar: varName }
+              { modifiedVar: currentFrame ? undefined : varName, funcFrame: currentFrame }
             );
           }
 
@@ -1150,10 +1446,10 @@ export class ProgramSimulator {
           continue;
         }
 
-        // 12. COUT / OUTPUT
+        // 13. COUT / OUTPUT
         if (trimmed.startsWith('cout') || trimmed.includes('cout <<') || trimmed.includes('cout<<')) {
-          const outputText = this.evalCout(trimmed, varMap);
-          recordStep(cur.lineNum, trimmed, `Output: ${outputText.replace('\n', '\\n')}`, { output: outputText });
+          const outputText = evalCout(trimmed, currentFrame);
+          recordStep(cur.lineNum, trimmed, `Output: ${outputText.replace('\n', '\\n')}`, { output: outputText, funcFrame: currentFrame });
           idx++;
           continue;
         }
@@ -1162,6 +1458,8 @@ export class ProgramSimulator {
         recordStep(cur.lineNum, trimmed, `Executed line ${cur.lineNum}: ${trimmed}`);
         idx++;
       }
+
+      return { hasReturned: false };
     };
 
     // Execute Main Program
@@ -1214,9 +1512,16 @@ export class ProgramSimulator {
 
         if (rawParams && rawParams !== 'void') {
           rawParams.split(',').forEach(p => {
-            const pMatch = p.trim().match(/([a-zA-Z_]\w*)\s+([a-zA-Z_]\w*)/);
+            const pTrim = p.trim();
+            const pMatch = pTrim.match(/^(?:const\s+)?([a-zA-Z_]\w*(?:\s*\*|\s*&)?)\s*([a-zA-Z_]\w*)(?:\[\s*\])?$/);
             if (pMatch) {
-              params.push({ type: pMatch[1], name: pMatch[2] });
+              const pType = pTrim.includes('[]') ? `${pMatch[1]}[]` : pMatch[1].trim();
+              params.push({ type: pType, name: pMatch[2].trim() });
+            } else {
+              const parts = pTrim.split(/\s+/);
+              if (parts.length >= 2) {
+                params.push({ type: parts[0], name: parts[parts.length - 1].replace(/[&*\[\]]/g, '') });
+              }
             }
           });
         }

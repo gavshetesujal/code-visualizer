@@ -149,6 +149,11 @@ export interface FunctionCallFrame {
   returnTargetVar?: string;
   isReturning?: boolean;
   callDepth: number;
+  state: 'created' | 'active' | 'waiting' | 'returning' | 'completed';
+  callerFrameId?: string;
+  callerFunctionName?: string;
+  waitingForCallSignature?: string;
+  calculationDetails?: string;
 }
 
 export interface LoopIterationGroup {
@@ -195,6 +200,7 @@ export interface ExecutionStep {
   inputRequest?: InputRequestState;
   conditionEvent?: ConditionBranchEvent;
   functionFrame?: FunctionCallFrame;
+  callStackFrames?: FunctionCallFrame[];
   arrayStructures?: ArrayMemoryStructure[];
   loopGroup?: LoopIterationGroup;
   isGroupHeader?: boolean;
