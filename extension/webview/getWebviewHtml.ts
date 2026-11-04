@@ -1326,6 +1326,14 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
   </footer>
 
   <script nonce="${nonce}">
+    window.onerror = function(msg, url, line, col, error) {
+      console.error('Visualizer Webview Error:', msg, 'at line', line, 'col', col, error);
+      const nc = document.getElementById('nodesContainer');
+      if (nc) {
+        nc.innerHTML = '<div style="color:#ef4444; background:rgba(239,68,68,0.1); border:1px solid #ef4444; border-radius:8px; padding:16px; margin:20px; font-family:monospace; font-size:12px;"><strong>Visualizer Error:</strong> ' + msg + ' (Line ' + line + ')</div>';
+      }
+    };
+
     const vscode = acquireVsCodeApi();
     let session = ${sessionJson};
     let currentStepIndex = session.currentStepIndex || 0;
@@ -1441,52 +1449,56 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
     // Adaptive Canvas Renderer
     function renderCanvas() {
-      const step = session.steps && session.steps[currentStepIndex];
-      if (!step) {
-        liveStmt.textContent = 'Waiting for execution...';
-        liveLine.textContent = '';
-        stepCounterText.textContent = 'Step 0 of 0';
-        backwardBtn.disabled = true;
-        forwardBtn.disabled = true;
-        structureTypePill.textContent = 'Waiting';
-        renderEmptyCanvas('Waiting for program execution...');
-        return;
-      }
-
-      // Update Live Indicator
-      liveStmt.textContent = step.statement;
-      liveLine.textContent = 'Line ' + step.line;
-
-      // Update Navigation
-      stepCounterText.textContent = 'Step ' + (currentStepIndex + 1) + ' of ' + session.steps.length;
-      backwardBtn.disabled = (currentStepIndex === 0);
-      forwardBtn.disabled = (currentStepIndex === session.steps.length - 1);
-      renderTimeline();
-
-      // Render Visual Structures
-      nodesContainer.innerHTML = '';
-      if (step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || step.functionFrame || (step.arrayStructures && step.arrayStructures.length > 0)) {
-        if (step.functionFrame) {
-          structureTypePill.textContent = 'Function: ' + step.functionFrame.functionName + '()';
-        } else if (step.activeLoop || (step.activeLoops && step.activeLoops.length > 0)) {
-          structureTypePill.textContent = 'Loop Visualization';
-        } else if (step.conditionEvent) {
-          structureTypePill.textContent = 'Condition Branch';
-        } else if (step.arrayStructures && step.arrayStructures.length > 0) {
-          structureTypePill.textContent = 'Array Memory';
-        } else {
-          structureTypePill.textContent = 'Variable State';
-        }
-        renderBucketsAndLoop(step);
-      } else {
-        const struct = (step.visualStructures && step.visualStructures[0]);
-        if (struct) {
-          structureTypePill.textContent = struct.title || struct.kind;
-          renderRowStructure(struct);
-        } else {
-          structureTypePill.textContent = 'Execution Flow';
+      try {
+        const step = session.steps && session.steps[currentStepIndex];
+        if (!step) {
+          liveStmt.textContent = 'Waiting for execution...';
+          liveLine.textContent = '';
+          stepCounterText.textContent = 'Step 0 of 0';
+          backwardBtn.disabled = true;
+          forwardBtn.disabled = true;
+          structureTypePill.textContent = 'Waiting';
           renderEmptyCanvas('Waiting for program execution...');
+          return;
         }
+
+        // Update Live Indicator
+        liveStmt.textContent = step.statement;
+        liveLine.textContent = 'Line ' + step.line;
+
+        // Update Navigation
+        stepCounterText.textContent = 'Step ' + (currentStepIndex + 1) + ' of ' + session.steps.length;
+        backwardBtn.disabled = (currentStepIndex === 0);
+        forwardBtn.disabled = (currentStepIndex === session.steps.length - 1);
+        renderTimeline();
+
+        // Render Visual Structures
+        nodesContainer.innerHTML = '';
+        if (step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || step.functionFrame || (step.arrayStructures && step.arrayStructures.length > 0)) {
+          if (step.functionFrame) {
+            structureTypePill.textContent = 'Function: ' + step.functionFrame.functionName + '()';
+          } else if (step.activeLoop || (step.activeLoops && step.activeLoops.length > 0)) {
+            structureTypePill.textContent = 'Loop Visualization';
+          } else if (step.conditionEvent) {
+            structureTypePill.textContent = 'Condition Branch';
+          } else if (step.arrayStructures && step.arrayStructures.length > 0) {
+            structureTypePill.textContent = 'Array Memory';
+          } else {
+            structureTypePill.textContent = 'Variable State';
+          }
+          renderBucketsAndLoop(step);
+        } else {
+          const struct = (step.visualStructures && step.visualStructures[0]);
+          if (struct) {
+            structureTypePill.textContent = struct.title || struct.kind;
+            renderRowStructure(struct);
+          } else {
+            structureTypePill.textContent = 'Execution Flow';
+            renderEmptyCanvas('Waiting for program execution...');
+          }
+        }
+      } catch (err) {
+        console.error('Error during renderCanvas:', err);
       }
     }
 
@@ -1773,11 +1785,6 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
       const row = document.createElement('div');
       row.className = 'flow-row';
-
-      const blocks = struct.blocks || [];
-      const connections = struct.connections || [];
-      const pointers = struct.pointers || [];
-      const callout = struct.callout;
 
       blocks.forEach((block, index) => {
         const wrapper = document.createElement('div');
