@@ -14,7 +14,8 @@ export class RealExecutionEngine {
    */
   public static async executeAndTrace(
     document: vscode.TextDocument,
-    userInputs: string[] = []
+    userInputs: string[] = [],
+    providedInputs: Record<string, string> = {}
   ): Promise<SessionData> {
     const filePath = document.fileName;
     const fileName = path.basename(filePath);
@@ -25,12 +26,12 @@ export class RealExecutionEngine {
         return await this.tracePython(filePath, fileName, userInputs);
       case 'c':
       case 'cpp':
-        return await this.traceNativeCpp(filePath, fileName, langId, userInputs);
+        return await this.traceNativeCpp(filePath, fileName, langId, userInputs, providedInputs);
       case 'java':
         return await this.traceJava(filePath, fileName, userInputs);
       default:
         // Use static and semantic code analyzer for any other file
-        const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId);
+        const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId, providedInputs);
         return {
           fileName,
           filePath,
@@ -103,10 +104,11 @@ export class RealExecutionEngine {
     filePath: string,
     fileName: string,
     langId: string,
-    userInputs: string[]
+    userInputs: string[],
+    providedInputs: Record<string, string> = {}
   ): Promise<SessionData> {
     // Dynamically analyze code to identify exactly what data structures or flow are in the file
-    const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId);
+    const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId, providedInputs);
 
     return {
       fileName,

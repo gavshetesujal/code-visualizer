@@ -15,6 +15,7 @@ export class VisualizationSession {
   private sessionData: SessionData;
   private lineDecoration: vscode.TextEditorDecorationType;
   private executionTerminal?: vscode.Terminal;
+  private providedInputs: Record<string, string> = {};
 
   private constructor(
     context: vscode.ExtensionContext,
@@ -143,13 +144,7 @@ export class VisualizationSession {
   }
 
   private setupListeners() {
-    this.history.setOnStepChangedListener(step => {
-      this.syncEditorDecoration();
-      this.panel.webview.postMessage({
-        type: 'setStep',
-        stepIndex: step.stepIndex
-      });
-    });
+    this.setupHistoryListener();
 
     this.panel.webview.onDidReceiveMessage(
       (msg: WebviewToExtensionMessage) => {
@@ -232,49 +227,44 @@ export class VisualizationSession {
     this.highlightSpecificLine(step.line);
   }
 
-  private handleUserInput(varName: string, value: string, stepIndex: number) {
+  private setupHistoryListener() {
+    this.history.setOnStepChangedListener(step => {
+      this.syncEditorDecoration();
+      this.panel.webview.postMessage({
+        type: 'setStep',
+        stepIndex: step.stepIndex
+      });
+    });
+  }
+
+  private async handleUserInput(varName: string, value: string, stepIndex: number) {
     if (this.executionTerminal) {
       this.executionTerminal.sendText(value);
     }
+    this.providedInputs[varName] = value;
 
-    const steps = this.sessionData.steps;
-    if (stepIndex >= 0 && stepIndex < steps.length) {
-      const step = steps[stepIndex];
-      if (step.inputRequest) {
-        step.inputRequest.isWaiting = false;
-        step.inputRequest.submittedValue = value;
-      }
-      if (step.buckets) {
-        const b = step.buckets.find(b => b.name === varName);
-        if (b) {
-          b.previousValue = b.value || '';
-          b.value = value;
-          b.isEmpty = false;
-          b.isModified = true;
-        }
-      }
+    const editor = vscode.window.visibleTextEditors.find(
+      e => e.document.uri.toString() === this.documentUri.toString()
+    );
+
+    if (editor) {
+      this.sessionData = await RealExecutionEngine.executeAndTrace(
+        editor.document,
+        [],
+        this.providedInputs
+      );
     }
 
-    // Propagate submitted value to subsequent steps
-    for (let i = stepIndex + 1; i < steps.length; i++) {
-      const st = steps[i];
-      if (st.buckets) {
-        const b = st.buckets.find(b => b.name === varName);
-        if (b && (b.isEmpty || !b.value)) {
-          b.value = value;
-          b.isEmpty = false;
-        }
-      }
-    }
+    this.history.dispose();
+    const nextIdx = Math.min(this.sessionData.steps.length - 1, stepIndex + 1);
+    this.history = new ExecutionHistory(this.sessionData.steps, nextIdx);
+    this.setupHistoryListener();
 
-    // Update webview and advance
     this.panel.webview.postMessage({
       type: 'init',
       session: this.sessionData
     });
-
-    const nextIndex = Math.min(steps.length - 1, stepIndex + 1);
-    this.history.goTo(nextIndex);
+    this.syncEditorDecoration();
   }
 
   public dispose() {

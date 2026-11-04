@@ -97,10 +97,14 @@ export interface VisualStructure {
 export interface VariableBucket {
   name: string;
   value: string;
+  type?: string;
   previousValue?: string;
   isModified?: boolean;
   isNew?: boolean;
   isEmpty?: boolean;
+  scope?: string;
+  isOutOfScope?: boolean;
+  pointsTo?: string; // pointer target variable name (e.g. "a" if int *ptr = &a)
 }
 
 export interface LoopContainerState {
@@ -115,6 +119,8 @@ export interface LoopContainerState {
   conditionPassed: boolean;
   phase: 'init' | 'condition' | 'body' | 'update' | 'exit';
   isExiting?: boolean;
+  depth?: number;
+  parentLoopId?: string;
 }
 
 export interface InputRequestState {
@@ -123,6 +129,40 @@ export interface InputRequestState {
   line: number;
   submittedValue?: string;
   isWaiting: boolean;
+  expectedType?: string;
+}
+
+export interface ConditionBranchEvent {
+  conditionText: string;
+  evaluatedResult: boolean;
+  branchTaken: 'if' | 'else-if' | 'else' | 'skipped';
+  explanation: string;
+}
+
+export interface FunctionCallFrame {
+  id: string;
+  functionName: string;
+  callSignature: string;
+  parameters: VariableBucket[];
+  localVariables: VariableBucket[];
+  returnValue?: string;
+  returnTargetVar?: string;
+  isReturning?: boolean;
+  callDepth: number;
+}
+
+export interface ArrayMemoryCell {
+  index: number;
+  label: string; // e.g. "arr[0]"
+  value: string;
+  isModified?: boolean;
+  previousValue?: string;
+}
+
+export interface ArrayMemoryStructure {
+  name: string;
+  type: string;
+  cells: ArrayMemoryCell[];
 }
 
 export interface ExecutionStep {
@@ -139,7 +179,11 @@ export interface ExecutionStep {
   visualStructures?: VisualStructure[];
   buckets?: VariableBucket[];
   activeLoop?: LoopContainerState;
+  activeLoops?: LoopContainerState[];
   inputRequest?: InputRequestState;
+  conditionEvent?: ConditionBranchEvent;
+  functionFrame?: FunctionCallFrame;
+  arrayStructures?: ArrayMemoryStructure[];
 }
 
 export interface SessionData {

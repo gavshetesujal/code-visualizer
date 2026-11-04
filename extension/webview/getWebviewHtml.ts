@@ -856,6 +856,198 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       transform: translateY(-1px);
     }
 
+    /* CONDITION EVALUATION BANNER */
+    .cond-eval-banner {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1.5px solid #334155;
+      border-radius: 12px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .cond-eval-banner.is-true {
+      border-color: #10b981;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+    }
+
+    .cond-eval-banner.is-false {
+      border-color: #f59e0b;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+    }
+
+    .cond-pill {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    .cond-pill.true {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid #10b981;
+    }
+
+    .cond-pill.false {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid #f59e0b;
+    }
+
+    .cond-text {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+
+    .cond-action-text {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    /* FUNCTION CALL FRAME */
+    .func-frame-card {
+      background: rgba(13, 21, 39, 0.9);
+      border: 2px solid #8b5cf6;
+      border-radius: 18px;
+      padding: 20px 26px;
+      margin-bottom: 20px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(139, 92, 246, 0.25);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 480px;
+    }
+
+    .func-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 10px;
+    }
+
+    .func-title {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: #c084fc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .func-depth-badge {
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid #8b5cf6;
+      color: #c084fc;
+      padding: 2px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .func-return-banner {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid #10b981;
+      color: #34d399;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ARRAY MEMORY CELLS */
+    .array-container {
+      background: rgba(11, 17, 32, 0.85);
+      border: 1.5px solid #1e293b;
+      border-radius: 16px;
+      padding: 18px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .array-title {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .array-cells-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .array-cell {
+      width: 72px;
+      height: 72px;
+      background: #0f172a;
+      border: 1.5px solid #334155;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 4px;
+      position: relative;
+      transition: all 0.25s ease;
+    }
+
+    .array-cell.is-modified {
+      border-color: #00f0ff;
+      box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .cell-index {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: #64748b;
+      font-weight: 600;
+    }
+
+    .cell-value {
+      font-family: var(--font-family);
+      font-size: 20px;
+      font-weight: 800;
+      color: #ffffff;
+      line-height: 1;
+    }
+
+    .ptr-tag {
+      position: absolute;
+      bottom: -22px;
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid #f59e0b;
+      color: #f59e0b;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
     /* LIVE EXECUTION CODE INDICATOR */
     .live-code-indicator {
       position: absolute;
@@ -1273,8 +1465,18 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
       // Render Visual Structures
       nodesContainer.innerHTML = '';
-      if (step.buckets || step.activeLoop || step.inputRequest) {
-        structureTypePill.textContent = step.activeLoop ? 'Loop Visualization' : 'Variable State';
+      if (step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || step.functionFrame || (step.arrayStructures && step.arrayStructures.length > 0)) {
+        if (step.functionFrame) {
+          structureTypePill.textContent = 'Function: ' + step.functionFrame.functionName + '()';
+        } else if (step.activeLoop || (step.activeLoops && step.activeLoops.length > 0)) {
+          structureTypePill.textContent = 'Loop Visualization';
+        } else if (step.conditionEvent) {
+          structureTypePill.textContent = 'Condition Branch';
+        } else if (step.arrayStructures && step.arrayStructures.length > 0) {
+          structureTypePill.textContent = 'Array Memory';
+        } else {
+          structureTypePill.textContent = 'Variable State';
+        }
         renderBucketsAndLoop(step);
       } else {
         const struct = (step.visualStructures && step.visualStructures[0]);
@@ -1302,11 +1504,83 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       mainWrapper.style.alignItems = 'center';
       mainWrapper.style.gap = '20px';
 
-      // 1. Dedicated Loop Container
-      if (step.activeLoop) {
-        const loop = step.activeLoop;
+      // 1. Condition & Branching Banner
+      if (step.conditionEvent) {
+        const cond = step.conditionEvent;
+        const banner = document.createElement('div');
+        banner.className = 'cond-eval-banner ' + (cond.evaluatedResult ? 'is-true' : 'is-false');
+        banner.innerHTML = \`
+          <span class="cond-pill \${cond.evaluatedResult ? 'true' : 'false'}">\${cond.evaluatedResult ? 'TRUE' : 'FALSE'}</span>
+          <span class="cond-text">\${cond.conditionText}</span>
+          <span class="cond-action-text">➔ \${cond.explanation || (cond.evaluatedResult ? 'Executing branch' : 'Skipping branch')}</span>
+        \`;
+        mainWrapper.appendChild(banner);
+      }
+
+      // 2. Function Call Frame
+      if (step.functionFrame) {
+        const ff = step.functionFrame;
+        const frameCard = document.createElement('div');
+        frameCard.className = 'func-frame-card';
+        frameCard.innerHTML = \`
+          <div class="func-header">
+            <div class="func-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+              <span>Function Frame: <strong>\${ff.callSignature}</strong></span>
+            </div>
+            <span class="func-depth-badge">Call Depth \${ff.callDepth}</span>
+          </div>
+          \${ff.returnValue !== undefined ? \`<div class="func-return-banner"><span>✓ Return Value:</span><strong>\${ff.returnValue}</strong></div>\` : ''}
+          <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters:</div>
+          <div class="buckets-grid" style="padding: 10px 0;">
+            \${ff.parameters.map(p => \`
+              <div class="var-bucket is-modified">
+                <span class="bucket-name-tag">\${p.name}</span>
+                <div class="bucket-value-container">
+                  <div class="bucket-current-val value-enter">\${p.value}</div>
+                </div>
+              </div>
+            \`).join('')}
+          </div>
+        \`;
+        mainWrapper.appendChild(frameCard);
+      }
+
+      // 3. Array Memory Structures
+      if (step.arrayStructures && step.arrayStructures.length > 0) {
+        step.arrayStructures.forEach(arr => {
+          const arrEl = document.createElement('div');
+          arrEl.className = 'array-container';
+          arrEl.innerHTML = \`
+            <div class="array-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+              <span>Array: <strong>\${arr.name} [\${arr.cells.length}]</strong></span>
+            </div>
+            <div class="array-cells-row">
+              \${arr.cells.map(c => \`
+                <div class="array-cell \${c.isModified ? 'is-modified' : ''}">
+                  <span class="cell-index">[\${c.index}]</span>
+                  <span class="cell-value \${c.isModified ? 'value-enter' : ''}">\${c.value}</span>
+                </div>
+              \`).join('')}
+            </div>
+          \`;
+          mainWrapper.appendChild(arrEl);
+        });
+      }
+
+      // 4. Dedicated Loop Containers (supports nested loops!)
+      const loopsToRender = (step.activeLoops && step.activeLoops.length > 0)
+        ? step.activeLoops
+        : (step.activeLoop ? [step.activeLoop] : []);
+
+      loopsToRender.forEach((loop, lIdx) => {
         const loopEl = document.createElement('div');
         loopEl.className = 'loop-container is-active-loop';
+        if (loop.depth && loop.depth > 1) {
+          loopEl.style.marginLeft = (loop.depth - 1) * 24 + 'px';
+          loopEl.style.borderColor = '#818cf8';
+        }
 
         const trackSvg = \`
           <svg class="loop-cycle-track" viewBox="0 0 60 120">
@@ -1337,7 +1611,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
           \${trackSvg}
           <div class="loop-header">
             <div class="loop-title">
-              <span class="loop-badge">\${loop.loopType.toUpperCase()} LOOP</span>
+              <span class="loop-badge">\${loop.loopType.toUpperCase()} LOOP \${loop.depth && loop.depth > 1 ? '(INNER)' : ''}</span>
               <span>\${loop.headerText}</span>
             </div>
             <div class="loop-phase-pill">
@@ -1368,13 +1642,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         \`;
 
         mainWrapper.appendChild(loopEl);
-      }
+      });
 
-      // 2. Variable Buckets (outside loop or all global variables)
+      // 5. Variable Buckets (outside loop or all global/local variables)
       const buckets = step.buckets || [];
-      const nonLoopBuckets = step.activeLoop 
-        ? buckets.filter(b => b.name !== step.activeLoop.variableName)
-        : buckets;
+      const loopVarNames = loopsToRender.map(l => l.variableName);
+      const nonLoopBuckets = buckets.filter(b => !loopVarNames.includes(b.name) && !b.isOutOfScope);
 
       if (nonLoopBuckets.length > 0) {
         const grid = document.createElement('div');
@@ -1403,6 +1676,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
             <div class="bucket-value-container">
               \${valHtml}
             </div>
+            \${b.pointsTo ? \`<span class="ptr-tag">➔ &\${b.pointsTo}</span>\` : ''}
           \`;
           grid.appendChild(bucketEl);
         });

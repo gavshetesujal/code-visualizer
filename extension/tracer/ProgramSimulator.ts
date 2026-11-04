@@ -1,4 +1,14 @@
-import { ExecutionStep, VariableBucket, LoopContainerState, InputRequestState, StructureKind } from '../types';
+import {
+  ExecutionStep,
+  VariableBucket,
+  LoopContainerState,
+  InputRequestState,
+  ConditionBranchEvent,
+  FunctionCallFrame,
+  ArrayMemoryStructure,
+  ArrayMemoryCell,
+  StructureKind
+} from '../types';
 
 export interface SimulationResult {
   steps: ExecutionStep[];
@@ -6,32 +16,51 @@ export interface SimulationResult {
   structureTitle: string;
 }
 
+interface FunctionDef {
+  returnType: string;
+  name: string;
+  params: { type: string; name: string }[];
+  startLine: number;
+  bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+}
+
 export class ProgramSimulator {
-  /**
-   * Checks whether the given code has variables, loops, or cin operations
-   * that should be visualized with Variable Buckets, Loop Containers, and Input Prompts.
-   */
   public static canSimulate(code: string): boolean {
     const hasVarDecl = /\b(int|float|double|char|string|bool|long|short)\s+[a-zA-Z_]\w*/.test(code);
     const hasLoop = /\b(for|while|do)\b/.test(code);
     const hasCin = /\bcin\s*>>/.test(code);
+    const hasIf = /\bif\s*\(/.test(code);
     const hasAssign = /[a-zA-Z_]\w*\s*=\s*[^=]/.test(code);
-    return hasVarDecl || hasLoop || hasCin || hasAssign;
+    const hasFunc = /\b(int|void|float|double|char|string|bool)\s+[a-zA-Z_]\w*\s*\([^)]*\)\s*\{/.test(code);
+    return hasVarDecl || hasLoop || hasCin || hasIf || hasAssign || hasFunc;
   }
 
-  public static simulate(code: string, lines: string[], fileName: string): SimulationResult {
+  public static simulate(
+    code: string,
+    lines: string[],
+    fileName: string,
+    providedInputs: Record<string, string> = {}
+  ): SimulationResult {
     const steps: ExecutionStep[] = [];
     const varOrder: string[] = [];
     const varMap = new Map<string, VariableBucket>();
+    const arrayMap = new Map<string, ArrayMemoryStructure>();
 
     // Cleaned lines with original 1-based line numbers
     const cleanLines: { lineNum: number; raw: string; trimmed: string }[] = [];
     lines.forEach((l, idx) => {
-      const trimmed = l.trim();
-      cleanLines.push({ lineNum: idx + 1, raw: l, trimmed });
+      cleanLines.push({ lineNum: idx + 1, raw: l, trimmed: l.trim() });
     });
 
-    let currentLoopState: LoopContainerState | undefined = undefined;
+    // 1. Extract non-main function definitions
+    const functionDefs = this.extractFunctions(cleanLines);
+
+    // 2. Identify main function body
+    const mainLines = this.extractMainLines(cleanLines);
+
+    // Active Loop Stack for nested loops
+    const activeLoopStack: LoopContainerState[] = [];
+    let currentFunctionFrame: FunctionCallFrame | undefined = undefined;
 
     const makeBucketsSnapshot = (modifiedName?: string): VariableBucket[] => {
       return varOrder.map(name => {
@@ -39,490 +68,852 @@ export class ProgramSimulator {
         return {
           name: b.name,
           value: b.value,
+          type: b.type,
           previousValue: b.previousValue,
           isModified: name === modifiedName,
           isNew: b.isNew,
-          isEmpty: b.isEmpty
+          isEmpty: b.isEmpty,
+          scope: b.scope,
+          isOutOfScope: b.isOutOfScope,
+          pointsTo: b.pointsTo
         };
       });
     };
 
-    // Find main function entry or start from line 1
-    let lineIdx = 0;
-    while (lineIdx < cleanLines.length) {
-      const current = cleanLines[lineIdx];
-      const trimmed = current.trimmed;
-
-      // Skip empty, comments, preprocessor, using directives
-      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('using ') || trimmed.startsWith('return ') && !trimmed.includes('return 0') && !trimmed.includes('return;')) {
-        lineIdx++;
-        continue;
-      }
-
-      // Check if entering main function
-      if (trimmed.includes('main(') || trimmed.includes('main ()')) {
-        lineIdx++;
-        continue;
-      }
-
-      // 1. FOR LOOP
-      const forMatch = trimmed.match(/^for\s*\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)/);
-      if (forMatch) {
-        const initPart = forMatch[1];
-        const condPart = forMatch[2];
-        const updatePart = forMatch[3];
-
-        // Parse loop body lines
-        const { bodyLines, endLineIdx } = this.extractBlockBody(cleanLines, lineIdx);
-
-        // Simulate the loop in actual C++ execution order:
-        // 1. Init
-        let loopVarName = '';
-        let loopVarVal = 0;
-        const initDeclMatch = initPart.match(/(?:int\s+)?([a-zA-Z_]\w*)\s*=\s*(-?\d+)/);
-        if (initDeclMatch) {
-          loopVarName = initDeclMatch[1];
-          loopVarVal = parseInt(initDeclMatch[2], 10);
-        }
-
-        const loopId = `loop_${current.lineNum}`;
-        const previousValues: string[] = [];
-
-        // 1. Init Step
-        currentLoopState = {
-          id: loopId,
-          loopType: 'for',
-          headerText: current.trimmed,
-          variableName: loopVarName || 'i',
-          currentValue: String(loopVarVal),
-          previousValues: [...previousValues],
-          iteration: 1,
-          conditionText: condPart,
-          conditionPassed: true,
-          phase: 'init'
-        };
-
-        // Also track loop variable in bucket if declared
-        if (loopVarName && !varMap.has(loopVarName)) {
-          varOrder.push(loopVarName);
-          varMap.set(loopVarName, {
-            name: loopVarName,
-            value: String(loopVarVal),
-            isNew: true,
-            isEmpty: false
-          });
-        }
-
-        steps.push({
-          stepIndex: steps.length,
-          totalSteps: 0,
-          line: current.lineNum,
-          statement: current.trimmed,
-          explanation: `Loop initialization: ${initPart}. Initialized '${loopVarName}' to ${loopVarVal}.`,
-          callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-          heap: [],
-          variables: [],
-          memoryDump: [],
-          output: '',
-          buckets: makeBucketsSnapshot(loopVarName),
-          activeLoop: { ...currentLoopState }
+    const makeArraysSnapshot = (): ArrayMemoryStructure[] => {
+      const arrs: ArrayMemoryStructure[] = [];
+      arrayMap.forEach(v => {
+        arrs.push({
+          name: v.name,
+          type: v.type,
+          cells: v.cells.map(c => ({ ...c }))
         });
+      });
+      return arrs;
+    };
 
-        // Loop iteration execution
-        let iteration = 1;
-        const maxIterations = 20; // safety guard
+    const makeLoopSnapshot = (): LoopContainerState | undefined => {
+      if (activeLoopStack.length === 0) return undefined;
+      return JSON.parse(JSON.stringify(activeLoopStack[activeLoopStack.length - 1]));
+    };
 
-        while (iteration <= maxIterations) {
-          // 2. Condition Step
-          const condPassed = this.evalCondition(condPart, loopVarName, loopVarVal);
-          currentLoopState.phase = 'condition';
-          currentLoopState.iteration = iteration;
-          currentLoopState.conditionPassed = condPassed;
-          currentLoopState.currentValue = String(loopVarVal);
-          currentLoopState.previousValues = [...previousValues];
+    const makeLoopsSnapshot = (): LoopContainerState[] => {
+      return JSON.parse(JSON.stringify(activeLoopStack));
+    };
 
-          steps.push({
-            stepIndex: steps.length,
-            totalSteps: 0,
-            line: current.lineNum,
-            statement: `${condPart} (${condPassed ? 'true' : 'false'})`,
-            explanation: `Evaluating condition '${condPart}': ${loopVarVal} ${condPart.replace(loopVarName, '').trim()} is ${condPassed ? 'TRUE' : 'FALSE'}.`,
-            callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-            heap: [],
-            variables: [],
-            memoryDump: [],
-            output: '',
-            buckets: makeBucketsSnapshot(),
-            activeLoop: { ...currentLoopState }
-          });
+    const recordStep = (
+      line: number,
+      stmt: string,
+      explanation: string,
+      opts: {
+        output?: string;
+        modifiedVar?: string;
+        inputReq?: InputRequestState;
+        condEvent?: ConditionBranchEvent;
+        funcFrame?: FunctionCallFrame;
+      } = {}
+    ) => {
+      const stepIdx = steps.length;
+      steps.push({
+        stepIndex: stepIdx,
+        totalSteps: 0,
+        line,
+        statement: stmt,
+        explanation,
+        callStack: [{
+          id: 1,
+          name: currentFunctionFrame ? `${currentFunctionFrame.functionName}()` : 'main()',
+          file: fileName,
+          line,
+          variables: []
+        }],
+        heap: [],
+        variables: [],
+        memoryDump: [],
+        output: opts.output || '',
+        buckets: makeBucketsSnapshot(opts.modifiedVar),
+        activeLoop: makeLoopSnapshot(),
+        activeLoops: makeLoopsSnapshot(),
+        inputRequest: opts.inputReq,
+        conditionEvent: opts.condEvent,
+        functionFrame: opts.funcFrame ? JSON.parse(JSON.stringify(opts.funcFrame)) : undefined,
+        arrayStructures: makeArraysSnapshot()
+      });
+    };
 
-          if (!condPassed) {
-            // Loop exits!
-            currentLoopState.phase = 'exit';
-            currentLoopState.isExiting = true;
-            steps.push({
-              stepIndex: steps.length,
-              totalSteps: 0,
-              line: current.lineNum,
-              statement: `Loop finished. Condition '${condPart}' is false.`,
-              explanation: `Exiting loop: '${condPart}' evaluated to false.`,
-              callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-              heap: [],
-              variables: [],
-              memoryDump: [],
-              output: '',
-              buckets: makeBucketsSnapshot(),
-              activeLoop: { ...currentLoopState }
-            });
-            break;
-          }
+    // Statement Execution Engine
+    const executeStatements = (
+      stmts: { lineNum: number; raw: string; trimmed: string }[],
+      scopeName: string
+    ) => {
+      let idx = 0;
+      while (idx < stmts.length) {
+        const cur = stmts[idx];
+        const trimmed = cur.trimmed;
 
-          // 3. Body Execution
-          for (const bLine of bodyLines) {
-            if (!bLine.trimmed || bLine.trimmed === '{' || bLine.trimmed === '}') continue;
-
-            // Handle cout inside loop
-            let outputText = '';
-            if (bLine.trimmed.startsWith('cout')) {
-              outputText = this.evalCout(bLine.trimmed, varMap, loopVarName, loopVarVal);
-            }
-
-            // Handle variable assignment inside loop
-            this.handleAssignment(bLine.trimmed, varMap, varOrder, loopVarName, loopVarVal);
-
-            currentLoopState.phase = 'body';
-            steps.push({
-              stepIndex: steps.length,
-              totalSteps: 0,
-              line: bLine.lineNum,
-              statement: bLine.trimmed,
-              explanation: `Loop body execution: ${bLine.trimmed}`,
-              callStack: [{ id: 1, name: 'main()', file: fileName, line: bLine.lineNum, variables: [] }],
-              heap: [],
-              variables: [],
-              memoryDump: [],
-              output: outputText,
-              buckets: makeBucketsSnapshot(),
-              activeLoop: { ...currentLoopState }
-            });
-          }
-
-          // 4. Update / Increment Step
-          previousValues.push(String(loopVarVal));
-          const oldVal = loopVarVal;
-          loopVarVal = this.evalUpdate(updatePart, loopVarVal);
-          
-          if (loopVarName && varMap.has(loopVarName)) {
-            const b = varMap.get(loopVarName)!;
-            b.previousValue = String(oldVal);
-            b.value = String(loopVarVal);
-            b.isModified = true;
-          }
-
-          currentLoopState.phase = 'update';
-          currentLoopState.currentValue = String(loopVarVal);
-          currentLoopState.previousValues = [...previousValues];
-
-          steps.push({
-            stepIndex: steps.length,
-            totalSteps: 0,
-            line: current.lineNum,
-            statement: updatePart,
-            explanation: `Increment loop variable: ${updatePart}. '${loopVarName}' updated from ${oldVal} to ${loopVarVal}.`,
-            callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-            heap: [],
-            variables: [],
-            memoryDump: [],
-            output: '',
-            buckets: makeBucketsSnapshot(loopVarName),
-            activeLoop: { ...currentLoopState }
-          });
-
-          iteration++;
+        if (!trimmed || trimmed === '{' || trimmed === '}' || trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('using')) {
+          idx++;
+          continue;
         }
 
-        currentLoopState = undefined;
-        lineIdx = endLineIdx + 1;
-        continue;
-      }
+        // Return statement
+        if (trimmed.startsWith('return')) {
+          const retMatch = trimmed.match(/^return\s*(.*?);?$/);
+          const retExpr = retMatch ? retMatch[1].trim() : '';
+          let retVal = '';
+          if (retExpr && retExpr !== '0') {
+            retVal = this.evaluateExpression(retExpr, '=', '', varMap);
+          }
+          recordStep(cur.lineNum, trimmed, `Return from ${scopeName} ${retVal ? `with value ${retVal}` : ''}.`);
+          idx++;
+          break;
+        }
 
-      // 2. WHILE LOOP
-      const whileMatch = trimmed.match(/^while\s*\(\s*(.*?)\s*\)/);
-      if (whileMatch && !trimmed.endsWith(';')) {
-        const condPart = whileMatch[1];
-        const { bodyLines, endLineIdx } = this.extractBlockBody(cleanLines, lineIdx);
+        // 1. FOR LOOP (supports nested for loops)
+        const forMatch = trimmed.match(/^for\s*\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)/);
+        if (forMatch) {
+          const initPart = forMatch[1];
+          const condPart = forMatch[2];
+          const updatePart = forMatch[3];
 
-        // Identify condition variable
-        const condVarMatch = condPart.match(/([a-zA-Z_]\w*)/);
-        const loopVarName = condVarMatch ? condVarMatch[1] : 'cond';
-        const loopId = `while_${current.lineNum}`;
-        const previousValues: string[] = [];
+          const { bodyLines, endLineIdx } = this.extractBlockBody(stmts, idx);
+          idx = endLineIdx + 1;
 
-        currentLoopState = {
-          id: loopId,
-          loopType: 'while',
-          headerText: current.trimmed,
-          variableName: loopVarName,
-          currentValue: varMap.has(loopVarName) ? varMap.get(loopVarName)!.value : '0',
-          previousValues: [...previousValues],
-          iteration: 1,
-          conditionText: condPart,
-          conditionPassed: true,
-          phase: 'condition'
-        };
-
-        let iteration = 1;
-        const maxIterations = 20;
-
-        while (iteration <= maxIterations) {
-          const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
-          const condPassed = this.evalCondition(condPart, loopVarName, curValNum);
-          currentLoopState.phase = 'condition';
-          currentLoopState.iteration = iteration;
-          currentLoopState.conditionPassed = condPassed;
-          currentLoopState.currentValue = String(curValNum);
-          currentLoopState.previousValues = [...previousValues];
-
-          steps.push({
-            stepIndex: steps.length,
-            totalSteps: 0,
-            line: current.lineNum,
-            statement: `while (${condPart}) [${condPassed ? 'true' : 'false'}]`,
-            explanation: `While condition '${condPart}' evaluated to ${condPassed ? 'TRUE' : 'FALSE'}.`,
-            callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-            heap: [],
-            variables: [],
-            memoryDump: [],
-            output: '',
-            buckets: makeBucketsSnapshot(),
-            activeLoop: { ...currentLoopState }
-          });
-
-          if (!condPassed) {
-            currentLoopState.phase = 'exit';
-            currentLoopState.isExiting = true;
-            steps.push({
-              stepIndex: steps.length,
-              totalSteps: 0,
-              line: current.lineNum,
-              statement: `Loop finished. Condition is false.`,
-              explanation: `Exiting while loop.`,
-              callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-              heap: [],
-              variables: [],
-              memoryDump: [],
-              output: '',
-              buckets: makeBucketsSnapshot(),
-              activeLoop: { ...currentLoopState }
-            });
-            break;
+          // Parse loop variable & initial value
+          let loopVarName = '';
+          let loopVarVal = 0;
+          const initDeclMatch = initPart.match(/(?:int\s+)?([a-zA-Z_]\w*)\s*=\s*(-?\d+)/);
+          if (initDeclMatch) {
+            loopVarName = initDeclMatch[1];
+            loopVarVal = parseInt(initDeclMatch[2], 10);
           }
 
-          // Execute body lines
-          for (const bLine of bodyLines) {
-            if (!bLine.trimmed || bLine.trimmed === '{' || bLine.trimmed === '}') continue;
-            let outputText = '';
-            if (bLine.trimmed.startsWith('cout')) {
-              outputText = this.evalCout(bLine.trimmed, varMap, loopVarName, curValNum);
-            }
-            const modified = this.handleAssignment(bLine.trimmed, varMap, varOrder, loopVarName, curValNum);
-            if (modified === loopVarName) {
-              previousValues.push(String(curValNum));
-            }
+          const loopId = `loop_${cur.lineNum}_depth${activeLoopStack.length + 1}`;
+          const previousValues: string[] = [];
 
-            steps.push({
-              stepIndex: steps.length,
-              totalSteps: 0,
-              line: bLine.lineNum,
-              statement: bLine.trimmed,
-              explanation: `Executing: ${bLine.trimmed}`,
-              callStack: [{ id: 1, name: 'main()', file: fileName, line: bLine.lineNum, variables: [] }],
-              heap: [],
-              variables: [],
-              memoryDump: [],
-              output: outputText,
-              buckets: makeBucketsSnapshot(modified),
-              activeLoop: { ...currentLoopState }
+          const loopState: LoopContainerState = {
+            id: loopId,
+            loopType: 'for',
+            headerText: trimmed,
+            variableName: loopVarName || 'i',
+            currentValue: String(loopVarVal),
+            previousValues: [...previousValues],
+            iteration: 1,
+            conditionText: condPart,
+            conditionPassed: true,
+            phase: 'init',
+            depth: activeLoopStack.length + 1,
+            parentLoopId: activeLoopStack.length > 0 ? activeLoopStack[activeLoopStack.length - 1].id : undefined
+          };
+
+          activeLoopStack.push(loopState);
+
+          if (loopVarName) {
+            if (!varMap.has(loopVarName)) {
+              varOrder.push(loopVarName);
+            }
+            varMap.set(loopVarName, {
+              name: loopVarName,
+              value: String(loopVarVal),
+              isNew: true,
+              isEmpty: false,
+              scope: scopeName
             });
           }
 
-          iteration++;
+          // Step 1: Init
+          recordStep(
+            cur.lineNum,
+            trimmed,
+            `Loop initialization: ${initPart}. Initialized '${loopVarName}' to ${loopVarVal}.`,
+            { modifiedVar: loopVarName }
+          );
+
+          let iteration = 1;
+          const maxIterations = 20;
+
+          while (iteration <= maxIterations) {
+            // Step 2: Condition
+            const condPassed = this.evalCondition(condPart, loopVarName, loopVarVal, varMap);
+            loopState.phase = 'condition';
+            loopState.iteration = iteration;
+            loopState.conditionPassed = condPassed;
+            loopState.currentValue = String(loopVarVal);
+            loopState.previousValues = [...previousValues];
+
+            recordStep(
+              cur.lineNum,
+              `${condPart} [${condPassed ? 'TRUE' : 'FALSE'}]`,
+              `Evaluating loop condition '${condPart}': ${loopVarVal} ${condPart.replace(loopVarName, '').trim()} is ${condPassed ? 'TRUE' : 'FALSE'}.`,
+              {
+                condEvent: {
+                  conditionText: condPart,
+                  evaluatedResult: condPassed,
+                  branchTaken: condPassed ? 'if' : 'skipped',
+                  explanation: condPassed ? 'Condition is TRUE. Executing loop body.' : 'Condition is FALSE. Exiting loop.'
+                }
+              }
+            );
+
+            if (!condPassed) {
+              // Loop Exit
+              loopState.phase = 'exit';
+              loopState.isExiting = true;
+              recordStep(
+                cur.lineNum,
+                `Loop finished. Condition '${condPart}' is false.`,
+                `Exiting loop after ${iteration - 1} iterations.`
+              );
+              break;
+            }
+
+            // Step 3: Body execution
+            loopState.phase = 'body';
+            executeStatements(bodyLines, `${scopeName}_loop`);
+
+            // Step 4: Update / Increment
+            previousValues.push(String(loopVarVal));
+            const oldVal = loopVarVal;
+            loopVarVal = this.evalUpdate(updatePart, loopVarVal);
+
+            if (loopVarName && varMap.has(loopVarName)) {
+              const b = varMap.get(loopVarName)!;
+              b.previousValue = String(oldVal);
+              b.value = String(loopVarVal);
+              b.isModified = true;
+            }
+
+            loopState.phase = 'update';
+            loopState.currentValue = String(loopVarVal);
+            loopState.previousValues = [...previousValues];
+
+            recordStep(
+              cur.lineNum,
+              updatePart,
+              `Update loop variable: ${updatePart}. '${loopVarName}' updated from ${oldVal} to ${loopVarVal}.`,
+              { modifiedVar: loopVarName }
+            );
+
+            iteration++;
+          }
+
+          activeLoopStack.pop();
+          continue;
         }
 
-        currentLoopState = undefined;
-        lineIdx = endLineIdx + 1;
-        continue;
-      }
+        // 2. WHILE LOOP
+        const whileMatch = trimmed.match(/^while\s*\(\s*(.*?)\s*\)/);
+        if (whileMatch && !trimmed.endsWith(';')) {
+          const condPart = whileMatch[1];
+          const { bodyLines, endLineIdx } = this.extractBlockBody(stmts, idx);
+          idx = endLineIdx + 1;
 
-      // 3. USER INPUT (`cin >> var1 >> var2`)
-      if (trimmed.startsWith('cin') || trimmed.includes('cin >>') || trimmed.includes('cin>>')) {
-        const inputVars: string[] = [];
-        const regex = />>\s*([a-zA-Z_]\w*)/g;
-        let m;
-        while ((m = regex.exec(trimmed)) !== null) {
-          inputVars.push(m[1]);
+          const condVarMatch = condPart.match(/([a-zA-Z_]\w*)/);
+          const loopVarName = condVarMatch ? condVarMatch[1] : 'cond';
+          const loopId = `while_${cur.lineNum}_depth${activeLoopStack.length + 1}`;
+          const previousValues: string[] = [];
+
+          const loopState: LoopContainerState = {
+            id: loopId,
+            loopType: 'while',
+            headerText: trimmed,
+            variableName: loopVarName,
+            currentValue: varMap.has(loopVarName) ? varMap.get(loopVarName)!.value : '0',
+            previousValues: [...previousValues],
+            iteration: 1,
+            conditionText: condPart,
+            conditionPassed: true,
+            phase: 'condition',
+            depth: activeLoopStack.length + 1,
+            parentLoopId: activeLoopStack.length > 0 ? activeLoopStack[activeLoopStack.length - 1].id : undefined
+          };
+
+          activeLoopStack.push(loopState);
+
+          let iteration = 1;
+          const maxIterations = 20;
+
+          while (iteration <= maxIterations) {
+            const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
+            const condPassed = this.evalCondition(condPart, loopVarName, curValNum, varMap);
+            loopState.phase = 'condition';
+            loopState.iteration = iteration;
+            loopState.conditionPassed = condPassed;
+            loopState.currentValue = String(curValNum);
+            loopState.previousValues = [...previousValues];
+
+            recordStep(
+              cur.lineNum,
+              `while (${condPart}) [${condPassed ? 'TRUE' : 'FALSE'}]`,
+              `While condition '${condPart}' evaluated to ${condPassed ? 'TRUE' : 'FALSE'}.`,
+              {
+                condEvent: {
+                  conditionText: condPart,
+                  evaluatedResult: condPassed,
+                  branchTaken: condPassed ? 'if' : 'skipped',
+                  explanation: condPassed ? 'Condition is TRUE. Executing while loop body.' : 'Condition is FALSE. Exiting while loop.'
+                }
+              }
+            );
+
+            if (!condPassed) {
+              loopState.phase = 'exit';
+              loopState.isExiting = true;
+              recordStep(cur.lineNum, `Loop finished. Condition is false.`, `Exiting while loop.`);
+              break;
+            }
+
+            previousValues.push(String(curValNum));
+            loopState.phase = 'body';
+            executeStatements(bodyLines, `${scopeName}_while`);
+
+            iteration++;
+          }
+
+          activeLoopStack.pop();
+          continue;
         }
 
-        for (const inputVar of inputVars) {
-          if (!varMap.has(inputVar)) {
-            varOrder.push(inputVar);
-            varMap.set(inputVar, {
-              name: inputVar,
-              value: '',
-              isEmpty: true,
+        // 3. DO-WHILE LOOP
+        if (trimmed.startsWith('do')) {
+          const res = this.extractBlockBody(stmts, idx);
+          const bodyLines = res.bodyLines;
+          let endLineIdx = res.endLineIdx;
+          let whileLine = endLineIdx < stmts.length ? stmts[endLineIdx] : cur;
+          let condPart = 'true';
+          const doWhileMatch = whileLine.trimmed.match(/while\s*\(\s*(.*?)\s*\)\s*;/);
+          if (doWhileMatch) {
+            condPart = doWhileMatch[1];
+          } else if (endLineIdx + 1 < stmts.length) {
+            const nextL = stmts[endLineIdx + 1];
+            const m = nextL.trimmed.match(/while\s*\(\s*(.*?)\s*\)\s*;/);
+            if (m) {
+              condPart = m[1];
+              endLineIdx++;
+            }
+          }
+          idx = endLineIdx + 1;
+
+          const condVarMatch = condPart.match(/([a-zA-Z_]\w*)/);
+          const loopVarName = condVarMatch ? condVarMatch[1] : 'i';
+          const loopId = `dowhile_${cur.lineNum}`;
+          const previousValues: string[] = [];
+
+          const loopState: LoopContainerState = {
+            id: loopId,
+            loopType: 'do-while',
+            headerText: `do ... while (${condPart})`,
+            variableName: loopVarName,
+            currentValue: varMap.has(loopVarName) ? varMap.get(loopVarName)!.value : '0',
+            previousValues: [...previousValues],
+            iteration: 1,
+            conditionText: condPart,
+            conditionPassed: true,
+            phase: 'body',
+            depth: activeLoopStack.length + 1
+          };
+
+          activeLoopStack.push(loopState);
+
+          let iteration = 1;
+          const maxIterations = 20;
+
+          while (iteration <= maxIterations) {
+            // In C++, do-while executes body first!
+            loopState.phase = 'body';
+            loopState.iteration = iteration;
+            recordStep(cur.lineNum, `do { ... } [Iteration ${iteration}]`, `Executing do-while loop body (Iteration ${iteration}).`);
+            executeStatements(bodyLines, `${scopeName}_dowhile`);
+
+            // Check condition after body execution
+            const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
+            const condPassed = this.evalGeneralCondition(condPart, varMap);
+            previousValues.push(String(curValNum));
+            loopState.phase = 'condition';
+            loopState.conditionPassed = condPassed;
+            loopState.currentValue = String(curValNum);
+            loopState.previousValues = [...previousValues];
+
+            recordStep(
+              whileLine.lineNum,
+              `while (${condPart}) [${condPassed ? 'TRUE' : 'FALSE'}]`,
+              `Evaluating do-while condition '${condPart}' after body: ${condPassed ? 'TRUE' : 'FALSE'}.`,
+              {
+                condEvent: {
+                  conditionText: condPart,
+                  evaluatedResult: condPassed,
+                  branchTaken: condPassed ? 'if' : 'skipped',
+                  explanation: condPassed ? 'Condition is TRUE. Repeating do-while loop.' : 'Condition is FALSE. Exiting do-while loop.'
+                }
+              }
+            );
+
+            if (!condPassed) {
+              loopState.phase = 'exit';
+              loopState.isExiting = true;
+              recordStep(whileLine.lineNum, `Loop finished. Condition is false.`, `Exiting do-while loop.`);
+              break;
+            }
+
+            iteration++;
+          }
+
+          activeLoopStack.pop();
+          continue;
+        }
+
+        // 4. IF / ELSE IF / ELSE BRANCHING
+        if (trimmed.startsWith('if')) {
+          const ifMatch = trimmed.match(/^if\s*\(\s*(.*?)\s*\)/);
+          if (ifMatch) {
+            const condPart = ifMatch[1];
+            const condPassed = this.evalGeneralCondition(condPart, varMap);
+
+            const { bodyLines: ifBody, endLineIdx: ifEnd } = this.extractBlockBody(stmts, idx);
+
+            // Check if followed by else / else if (e.g. "} else {" or "else {")
+            let elseBody: { lineNum: number; raw: string; trimmed: string }[] | null = null;
+            let elseIfCond = '';
+            let elseIfPassed = false;
+            let elseIfBody: { lineNum: number; raw: string; trimmed: string }[] | null = null;
+
+            let elseIdx = ifEnd;
+            if (elseIdx < stmts.length && !stmts[elseIdx].trimmed.includes('else')) {
+              elseIdx++;
+            }
+
+            if (elseIdx < stmts.length && stmts[elseIdx].trimmed.includes('else')) {
+              const elseLine = stmts[elseIdx].trimmed;
+              if (elseLine.includes('else if')) {
+                const elseIfMatch = elseLine.match(/else\s+if\s*\(\s*(.*?)\s*\)/);
+                if (elseIfMatch) {
+                  elseIfCond = elseIfMatch[1];
+                  elseIfPassed = !condPassed && this.evalGeneralCondition(elseIfCond, varMap);
+                  const { bodyLines, endLineIdx } = this.extractBlockBody(stmts, elseIdx);
+                  elseIfBody = bodyLines;
+                  idx = endLineIdx + 1;
+                }
+              } else {
+                const { bodyLines, endLineIdx } = this.extractBlockBody(stmts, elseIdx);
+                elseBody = bodyLines;
+                idx = endLineIdx + 1;
+              }
+            } else {
+              idx = ifEnd + 1;
+            }
+
+            // Step for condition evaluation
+            recordStep(
+              cur.lineNum,
+              `if (${condPart}) [${condPassed ? 'TRUE' : 'FALSE'}]`,
+              `Evaluated condition '${condPart}': result is ${condPassed ? 'TRUE' : 'FALSE'}. ${condPassed ? 'Taking IF branch.' : 'Skipping IF branch.'}`,
+              {
+                condEvent: {
+                  conditionText: condPart,
+                  evaluatedResult: condPassed,
+                  branchTaken: condPassed ? 'if' : (elseBody ? 'else' : 'skipped'),
+                  explanation: condPassed ? 'Condition is TRUE' : 'Condition is FALSE'
+                }
+              }
+            );
+
+            if (condPassed) {
+              executeStatements(ifBody, `${scopeName}_if`);
+            } else if (elseIfBody && elseIfPassed) {
+              executeStatements(elseIfBody, `${scopeName}_elseif`);
+            } else if (elseBody) {
+              recordStep(
+                stmts[idx - 1] ? stmts[idx - 1].lineNum : cur.lineNum,
+                `else { ... }`,
+                `IF condition was FALSE. Executing ELSE branch.`,
+                {
+                  condEvent: {
+                    conditionText: 'else',
+                    evaluatedResult: true,
+                    branchTaken: 'else',
+                    explanation: 'Executing ELSE branch'
+                  }
+                }
+              );
+              executeStatements(elseBody, `${scopeName}_else`);
+            }
+
+            continue;
+          }
+        }
+
+        // 5. USER INPUT (cin >> var1 >> var2)
+        if (trimmed.startsWith('cin') || trimmed.includes('cin >>') || trimmed.includes('cin>>')) {
+          const inputVars: string[] = [];
+          const regex = />>\s*([a-zA-Z_]\w*)/g;
+          let m;
+          while ((m = regex.exec(trimmed)) !== null) {
+            inputVars.push(m[1]);
+          }
+
+          for (const inputVar of inputVars) {
+            if (!varMap.has(inputVar)) {
+              varOrder.push(inputVar);
+              varMap.set(inputVar, {
+                name: inputVar,
+                value: '',
+                isEmpty: true,
+                isNew: true,
+                scope: scopeName
+              });
+            }
+
+            const b = varMap.get(inputVar)!;
+            const submittedVal = providedInputs[inputVar];
+
+            if (submittedVal !== undefined && submittedVal !== '') {
+              // Apply user's submitted input!
+              b.previousValue = b.value || '';
+              b.value = submittedVal;
+              b.isEmpty = false;
+              b.isModified = true;
+
+              recordStep(
+                cur.lineNum,
+                `cin >> ${inputVar}; [received: ${submittedVal}]`,
+                `Received user input for '${inputVar}': value ${submittedVal} entered the bucket.`,
+                { modifiedVar: inputVar }
+              );
+            } else {
+              // Pause and request input
+              recordStep(
+                cur.lineNum,
+                `cin >> ${inputVar};`,
+                `Program paused: waiting for user input for variable '${inputVar}'.`,
+                {
+                  inputReq: {
+                    variableName: inputVar,
+                    promptText: `cin >> ${inputVar};`,
+                    line: cur.lineNum,
+                    isWaiting: true,
+                    expectedType: b.type || 'int'
+                  }
+                }
+              );
+            }
+          }
+
+          idx++;
+          continue;
+        }
+
+        // 6. FUNCTION CALL STATEMENT (e.g. int answer = add(x, y); or answer = add(x, y); or printMessage();)
+        const funcCallMatch = trimmed.match(/^(?:(?:int|float|double|char|string|bool|long|short|void|auto)\s+)?(?:([a-zA-Z_]\w*)\s*=\s*)?([a-zA-Z_]\w*)\s*\((.*?)\)\s*;$/);
+        if (funcCallMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin') && !trimmed.startsWith('for') && !trimmed.startsWith('while') && !trimmed.startsWith('if')) {
+          const assignVar = funcCallMatch[1];
+          const funcName = funcCallMatch[2];
+          const argList = funcCallMatch[3].split(',').map(a => a.trim()).filter(Boolean);
+
+          const targetFunc = functionDefs.get(funcName);
+          if (targetFunc) {
+            // Evaluate arguments
+            const evalArgs = argList.map(a => this.evaluateExpression(a, '=', '', varMap));
+
+            // Create function call frame
+            const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => ({
+              name: p.name,
+              value: evalArgs[i] || '0',
+              type: p.type,
+              scope: funcName,
               isNew: true
+            }));
+
+            const frame: FunctionCallFrame = {
+              id: `call_${funcName}_${cur.lineNum}`,
+              functionName: funcName,
+              callSignature: `${funcName}(${evalArgs.join(', ')})`,
+              parameters: paramBuckets,
+              localVariables: [],
+              callDepth: (currentFunctionFrame ? currentFunctionFrame.callDepth + 1 : 1)
+            };
+
+            currentFunctionFrame = frame;
+
+            // Step: Function call transition
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `Function call: entering '${funcName}()' with arguments (${evalArgs.join(', ')}).`,
+              { funcFrame: frame }
+            );
+
+            // Add parameters into variable map under function scope
+            paramBuckets.forEach(p => {
+              const key = `${funcName}:${p.name}`;
+              varMap.set(key, p);
+              if (!varOrder.includes(key)) varOrder.push(key);
+            });
+
+            // Execute function body lines
+            executeStatements(targetFunc.bodyLines, funcName);
+
+            // Determine return value
+            let retVal = '0';
+            for (const bl of targetFunc.bodyLines) {
+              if (bl.trimmed.startsWith('return')) {
+                const rm = bl.trimmed.match(/^return\s*(.*?);?$/);
+                if (rm && rm[1]) {
+                  retVal = this.evaluateExpression(rm[1], '=', '', varMap);
+                }
+              }
+            }
+
+            frame.returnValue = retVal;
+            frame.isReturning = true;
+
+            // Step: Return transition
+            recordStep(
+              cur.lineNum,
+              `return ${retVal};`,
+              `Function '${funcName}()' finished: returned ${retVal} to caller.`,
+              { funcFrame: frame }
+            );
+
+            // Clean up function scope variables
+            paramBuckets.forEach(p => {
+              const key = `${funcName}:${p.name}`;
+              p.isOutOfScope = true;
+            });
+
+            // Store return value if assigned
+            if (assignVar) {
+              if (!varMap.has(assignVar)) {
+                varOrder.push(assignVar);
+                varMap.set(assignVar, { name: assignVar, value: '', scope: scopeName });
+              }
+              const b = varMap.get(assignVar)!;
+              b.previousValue = b.value;
+              b.value = retVal;
+              b.isModified = true;
+              b.isEmpty = false;
+
+              recordStep(
+                cur.lineNum,
+                `${assignVar} = ${retVal};`,
+                `Stored returned value ${retVal} into '${assignVar}'.`,
+                { modifiedVar: assignVar }
+              );
+            }
+
+            currentFunctionFrame = undefined;
+            idx++;
+            continue;
+          }
+        }
+
+        // 7. ARRAY DECLARATION (e.g. int arr[4] = {10, 20, 30, 40}; or int nums[3];)
+        const arrayDeclMatch = trimmed.match(/^(?:const\s+)?(int|float|double|char|string)\s+([a-zA-Z_]\w*)\s*\[\s*(\d*)\s*\]\s*(?:=\s*\{([^}]*)\})?\s*;$/);
+        if (arrayDeclMatch) {
+          const elemType = arrayDeclMatch[1];
+          const arrName = arrayDeclMatch[2];
+          const sizeStr = arrayDeclMatch[3];
+          const initList = arrayDeclMatch[4] ? arrayDeclMatch[4].split(',').map(s => s.trim()) : [];
+
+          const count = sizeStr ? parseInt(sizeStr, 10) : initList.length;
+          const cells: ArrayMemoryCell[] = [];
+
+          for (let c = 0; c < count; c++) {
+            const val = c < initList.length ? initList[c] : '0';
+            cells.push({
+              index: c,
+              label: `${arrName}[${c}]`,
+              value: val
             });
           }
 
-          // Step requesting input (paused, waiting for input)
-          steps.push({
-            stepIndex: steps.length,
-            totalSteps: 0,
-            line: current.lineNum,
-            statement: `cin >> ${inputVar};`,
-            explanation: `Waiting for user input for variable '${inputVar}'.`,
-            callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-            heap: [],
-            variables: [],
-            memoryDump: [],
-            output: '',
-            buckets: makeBucketsSnapshot(),
-            inputRequest: {
-              variableName: inputVar,
-              promptText: `cin >> ${inputVar};`,
-              line: current.lineNum,
-              isWaiting: true
+          arrayMap.set(arrName, {
+            name: arrName,
+            type: elemType,
+            cells
+          });
+
+          recordStep(
+            cur.lineNum,
+            trimmed,
+            `Created array '${arrName}' with ${count} indexed elements [${cells.map(c => c.value).join(', ')}].`
+          );
+
+          idx++;
+          continue;
+        }
+
+        // 8. ARRAY ELEMENT ASSIGNMENT (e.g. arr[1] = 99; or arr[i] = x;)
+        const arrAssignMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*\[\s*([^\]]+)\s*\]\s*=\s*(.+?);$/);
+        if (arrAssignMatch) {
+          const arrName = arrAssignMatch[1];
+          const idxExpr = arrAssignMatch[2].trim();
+          const valExpr = arrAssignMatch[3].trim();
+
+          if (arrayMap.has(arrName)) {
+            const arr = arrayMap.get(arrName)!;
+            const evalIdx = parseInt(this.evaluateExpression(idxExpr, '=', '0', varMap), 10);
+            const evalVal = this.evaluateExpression(valExpr, '=', '0', varMap);
+
+            if (evalIdx >= 0 && evalIdx < arr.cells.length) {
+              const cell = arr.cells[evalIdx];
+              cell.previousValue = cell.value;
+              cell.value = evalVal;
+              cell.isModified = true;
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `Updated array element ${arrName}[${evalIdx}] from '${cell.previousValue}' to '${evalVal}'.`
+              );
             }
-          });
-        }
-
-        lineIdx++;
-        continue;
-      }
-
-      // 4. VARIABLE DECLARATION (e.g. int a = 10; float marks = 85.5; char grade = 'A'; double salary = 45000.75; int age;)
-      const declMatch = trimmed.match(/^(?:const\s+)?(int|float|double|char|string|bool|long|short)\s+(.+?);$/);
-      if (declMatch) {
-        const varDefs = declMatch[2].split(',');
-        for (const def of varDefs) {
-          const parts = def.trim().split('=');
-          const varName = parts[0].trim();
-          let initVal = parts.length > 1 ? parts[1].trim() : '';
-
-          // Format clean literal representation
-          if (initVal.startsWith('"') && initVal.endsWith('"')) {
-            initVal = initVal.slice(1, -1);
-          } else if (initVal.startsWith("'") && initVal.endsWith("'")) {
-            initVal = initVal.slice(1, -1);
           }
 
-          const isUninitialized = !initVal;
-          if (!varMap.has(varName)) {
-            varOrder.push(varName);
+          idx++;
+          continue;
+        }
+
+        // 9. POINTER DECLARATION (e.g. int *ptr = &a;)
+        const ptrMatch = trimmed.match(/^(int|float|double|char)\s*\*\s*([a-zA-Z_]\w*)\s*=\s*&\s*([a-zA-Z_]\w*)\s*;$/);
+        if (ptrMatch) {
+          const ptrType = ptrMatch[1];
+          const ptrName = ptrMatch[2];
+          const targetVar = ptrMatch[3];
+
+          if (!varMap.has(ptrName)) {
+            varOrder.push(ptrName);
           }
-          varMap.set(varName, {
-            name: varName,
-            value: initVal,
-            isEmpty: isUninitialized,
-            isNew: true
+          varMap.set(ptrName, {
+            name: ptrName,
+            value: `&${targetVar}`,
+            type: 'pointer',
+            pointsTo: targetVar,
+            isNew: true,
+            scope: scopeName
           });
 
-          steps.push({
-            stepIndex: steps.length,
-            totalSteps: 0,
-            line: current.lineNum,
-            statement: current.trimmed,
-            explanation: isUninitialized
-              ? `Declared variable '${varName}' (uninitialized, waiting for value).`
-              : `Created bucket for variable '${varName}' with value ${initVal}.`,
-            callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-            heap: [],
-            variables: [],
-            memoryDump: [],
-            output: '',
-            buckets: makeBucketsSnapshot(varName)
-          });
+          recordStep(
+            cur.lineNum,
+            trimmed,
+            `Created pointer '${ptrName}' pointing to variable bucket '${targetVar}'.`,
+            { modifiedVar: ptrName }
+          );
+
+          idx++;
+          continue;
         }
 
-        lineIdx++;
-        continue;
-      }
+        // 10. VARIABLE DECLARATION (e.g. int a = 10; float marks = 85.5; char grade = 'A'; int age;)
+        const declMatch = trimmed.match(/^(?:const\s+)?(int|float|double|char|string|bool|long|short)\s+(.+?);$/);
+        if (declMatch && !trimmed.includes('(')) {
+          const varType = declMatch[1];
+          const varDefs = declMatch[2].split(',');
+          for (const def of varDefs) {
+            const parts = def.trim().split('=');
+            const varName = parts[0].trim();
+            let initVal = parts.length > 1 ? parts[1].trim() : '';
 
-      // 5. VARIABLE ASSIGNMENT (e.g. a = 20; a = 50; a += 5;)
-      const assignMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
-      if (assignMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin')) {
-        const varName = assignMatch[1];
-        const op = assignMatch[2];
-        const expr = assignMatch[3].trim();
+            // Evaluate expression if initial value is provided
+            if (initVal) {
+              initVal = this.evaluateExpression(initVal, '=', '', varMap);
+            }
 
-        if (varMap.has(varName)) {
-          const b = varMap.get(varName)!;
-          const oldVal = b.value;
-          const newVal = this.evaluateExpression(expr, op, oldVal, varMap);
+            const isUninitialized = !initVal;
+            if (!varMap.has(varName)) {
+              varOrder.push(varName);
+            }
+            varMap.set(varName, {
+              name: varName,
+              value: initVal,
+              type: varType,
+              isEmpty: isUninitialized,
+              isNew: true,
+              scope: scopeName
+            });
 
-          b.previousValue = oldVal;
-          b.value = newVal;
-          b.isModified = true;
-          b.isEmpty = false;
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              isUninitialized
+                ? `Created empty bucket for variable '${varName}' (uninitialized, waiting for value).`
+                : `Created bucket for variable '${varName}' with value ${initVal}.`,
+              { modifiedVar: varName }
+            );
+          }
 
-          steps.push({
-            stepIndex: steps.length,
-            totalSteps: 0,
-            line: current.lineNum,
-            statement: current.trimmed,
-            explanation: `Updated '${varName}': previous value '${oldVal}' moves out, new value '${newVal}' enters.`,
-            callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-            heap: [],
-            variables: [],
-            memoryDump: [],
-            output: '',
-            buckets: makeBucketsSnapshot(varName)
-          });
+          idx++;
+          continue;
         }
 
-        lineIdx++;
-        continue;
-      }
+        // 11. INCREMENT / DECREMENT STATEMENT (e.g. x++; x--; ++x; --x;)
+        const incDecMatch = trimmed.match(/^(\+\+|--)?\s*([a-zA-Z_]\w*)\s*(\+\+|--)?;?$/);
+        if (incDecMatch && (incDecMatch[1] || incDecMatch[3])) {
+          const varName = incDecMatch[2];
+          const isInc = (incDecMatch[1] === '++' || incDecMatch[3] === '++');
+          if (varMap.has(varName)) {
+            const b = varMap.get(varName)!;
+            const oldValNum = parseFloat(b.value || '0');
+            const newValNum = isInc ? oldValNum + 1 : oldValNum - 1;
+            b.previousValue = b.value;
+            b.value = String(newValNum);
+            b.isModified = true;
+            b.isEmpty = false;
 
-      // 6. COUT / OUTPUT
-      if (trimmed.startsWith('cout') || trimmed.includes('cout <<') || trimmed.includes('cout<<')) {
-        const outputText = this.evalCout(trimmed, varMap);
-        steps.push({
-          stepIndex: steps.length,
-          totalSteps: 0,
-          line: current.lineNum,
-          statement: current.trimmed,
-          explanation: `Program output: ${outputText}`,
-          callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-          heap: [],
-          variables: [],
-          memoryDump: [],
-          output: outputText,
-          buckets: makeBucketsSnapshot()
-        });
-        lineIdx++;
-        continue;
-      }
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `${isInc ? 'Incremented' : 'Decremented'} '${varName}' from ${b.previousValue} to ${b.value}.`,
+              { modifiedVar: varName }
+            );
+            idx++;
+            continue;
+          }
+        }
 
-      // Generic statement
-      if (trimmed !== '{' && trimmed !== '}' && !trimmed.startsWith('//')) {
-        steps.push({
-          stepIndex: steps.length,
-          totalSteps: 0,
-          line: current.lineNum,
-          statement: current.trimmed,
-          explanation: `Executed line ${current.lineNum}: ${current.trimmed}`,
-          callStack: [{ id: 1, name: 'main()', file: fileName, line: current.lineNum, variables: [] }],
-          heap: [],
-          variables: [],
-          memoryDump: [],
-          output: '',
-          buckets: makeBucketsSnapshot()
-        });
-      }
+        // 12. VARIABLE ASSIGNMENT (e.g. a = 20; a = 50; a += 5;)
+        const assignMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
+        if (assignMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin')) {
+          const varName = assignMatch[1];
+          const op = assignMatch[2];
+          const expr = assignMatch[3].trim();
 
-      lineIdx++;
-    }
+          if (varMap.has(varName)) {
+            const b = varMap.get(varName)!;
+            const oldVal = b.value;
+            const newVal = this.evaluateExpression(expr, op, oldVal, varMap);
+
+            b.previousValue = oldVal;
+            b.value = newVal;
+            b.isModified = true;
+            b.isEmpty = false;
+
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `Updated variable '${varName}': previous value '${oldVal}' moves out, new value '${newVal}' enters.`,
+              { modifiedVar: varName }
+            );
+          }
+
+          idx++;
+          continue;
+        }
+
+        // 12. COUT / OUTPUT
+        if (trimmed.startsWith('cout') || trimmed.includes('cout <<') || trimmed.includes('cout<<')) {
+          const outputText = this.evalCout(trimmed, varMap);
+          recordStep(cur.lineNum, trimmed, `Output: ${outputText.replace('\n', '\\n')}`, { output: outputText });
+          idx++;
+          continue;
+        }
+
+        // Generic statement
+        recordStep(cur.lineNum, trimmed, `Executed line ${cur.lineNum}: ${trimmed}`);
+        idx++;
+      }
+    };
+
+    // Execute Main Program
+    executeStatements(mainLines, 'main');
 
     if (steps.length === 0) {
       return {
@@ -546,35 +937,95 @@ export class ProgramSimulator {
 
     steps.forEach(s => (s.totalSteps = steps.length));
 
-    const detectedKind: StructureKind = 'variables';
-    const structureTitle = varOrder.length > 0 ? `Variables & State (${varOrder.length} Buckets)` : 'Program Execution';
-
     return {
       steps,
-      detectedKind,
-      structureTitle
+      detectedKind: 'variables',
+      structureTitle: varOrder.length > 0 ? `Variables & State (${varOrder.length} Buckets)` : 'Program Execution'
     };
   }
 
+  // --- Helper Methods ---
+
+  private static extractFunctions(
+    lines: { lineNum: number; raw: string; trimmed: string }[]
+  ): Map<string, FunctionDef> {
+    const map = new Map<string, FunctionDef>();
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trimmed;
+      const funcMatch = line.match(/^(int|void|float|double|char|string|bool)\s+([a-zA-Z_]\w*)\s*\((.*?)\)\s*\{?$/);
+      if (funcMatch && funcMatch[2] !== 'main') {
+        const returnType = funcMatch[1];
+        const name = funcMatch[2];
+        const rawParams = funcMatch[3].trim();
+        const params: { type: string; name: string }[] = [];
+
+        if (rawParams && rawParams !== 'void') {
+          rawParams.split(',').forEach(p => {
+            const pMatch = p.trim().match(/([a-zA-Z_]\w*)\s+([a-zA-Z_]\w*)/);
+            if (pMatch) {
+              params.push({ type: pMatch[1], name: pMatch[2] });
+            }
+          });
+        }
+
+        const { bodyLines, endLineIdx } = this.extractBlockBody(lines, i);
+        map.set(name, {
+          returnType,
+          name,
+          params,
+          startLine: lines[i].lineNum,
+          bodyLines
+        });
+        i = endLineIdx + 1;
+        continue;
+      }
+      i++;
+    }
+    return map;
+  }
+
+  private static extractMainLines(
+    lines: { lineNum: number; raw: string; trimmed: string }[]
+  ): { lineNum: number; raw: string; trimmed: string }[] {
+    let mainIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trimmed.match(/^(?:int|void)\s+main\s*\(/)) {
+        mainIdx = i;
+        break;
+      }
+    }
+
+    if (mainIdx !== -1) {
+      const { bodyLines } = this.extractBlockBody(lines, mainIdx);
+      return bodyLines;
+    }
+
+    // If no explicit main(), filter out function definitions and use top-level statements
+    return lines.filter(l => {
+      const t = l.trimmed;
+      return t && !t.startsWith('//') && !t.startsWith('#') && !t.startsWith('using');
+    });
+  }
+
   private static extractBlockBody(
-    cleanLines: { lineNum: number; raw: string; trimmed: string }[],
+    lines: { lineNum: number; raw: string; trimmed: string }[],
     startIdx: number
   ): { bodyLines: { lineNum: number; raw: string; trimmed: string }[]; endLineIdx: number } {
     const bodyLines: { lineNum: number; raw: string; trimmed: string }[] = [];
     let endLineIdx = startIdx;
 
-    // Check if next line is '{' or '{' is on the same line
     let i = startIdx + 1;
     let braceCount = 0;
     let foundOpenBrace = false;
 
-    if (cleanLines[startIdx].trimmed.includes('{')) {
+    if (lines[startIdx].trimmed.includes('{')) {
       braceCount++;
       foundOpenBrace = true;
     }
 
-    while (i < cleanLines.length) {
-      const line = cleanLines[i];
+    while (i < lines.length) {
+      const line = lines[i];
       if (!foundOpenBrace) {
         if (line.trimmed === '{') {
           foundOpenBrace = true;
@@ -582,23 +1033,28 @@ export class ProgramSimulator {
           i++;
           continue;
         } else if (line.trimmed && !line.trimmed.startsWith('//')) {
-          // Single line body without braces
           bodyLines.push(line);
           endLineIdx = i;
           return { bodyLines, endLineIdx };
         }
       } else {
-        if (line.trimmed.includes('{')) braceCount++;
-        if (line.trimmed.includes('}')) {
-          braceCount--;
-          if (braceCount <= 0) {
-            endLineIdx = i;
-            break;
+        let hitClosing = false;
+        for (const char of line.trimmed) {
+          if (char === '}') {
+            braceCount--;
+            if (braceCount <= 0) {
+              endLineIdx = i;
+              hitClosing = true;
+              break;
+            }
+          } else if (char === '{') {
+            braceCount++;
           }
         }
-        if (line.trimmed !== '{' && line.trimmed !== '}') {
-          bodyLines.push(line);
+        if (hitClosing) {
+          break;
         }
+        bodyLines.push(line);
       }
       i++;
     }
@@ -606,9 +1062,34 @@ export class ProgramSimulator {
     return { bodyLines, endLineIdx: Math.max(endLineIdx, i - 1) };
   }
 
-  private static evalCondition(cond: string, varName: string, varVal: number): boolean {
+  private static evalCondition(
+    cond: string,
+    varName: string,
+    varVal: number,
+    varMap: Map<string, VariableBucket>
+  ): boolean {
     try {
-      const sanitized = cond.replace(new RegExp(`\\b${varName}\\b`, 'g'), String(varVal));
+      let sanitized = cond.replace(new RegExp(`\\b${varName}\\b`, 'g'), String(varVal));
+      varMap.forEach((v, k) => {
+        if (k !== varName && v.value) {
+          sanitized = sanitized.replace(new RegExp(`\\b${k}\\b`, 'g'), v.value);
+        }
+      });
+      // eslint-disable-next-line no-eval
+      return Boolean(Function(`"use strict"; return (${sanitized});`)());
+    } catch (e) {
+      return false;
+    }
+  }
+
+  private static evalGeneralCondition(cond: string, varMap: Map<string, VariableBucket>): boolean {
+    try {
+      let sanitized = cond;
+      varMap.forEach((v, k) => {
+        if (v.value) {
+          sanitized = sanitized.replace(new RegExp(`\\b${k}\\b`, 'g'), v.value);
+        }
+      });
       // eslint-disable-next-line no-eval
       return Boolean(Function(`"use strict"; return (${sanitized});`)());
     } catch (e) {
@@ -635,15 +1116,14 @@ export class ProgramSimulator {
     oldVal: string,
     varMap: Map<string, VariableBucket>
   ): string {
-    // If simple literal
     let exp = expr.trim();
     if (exp.startsWith('"') && exp.endsWith('"')) return exp.slice(1, -1);
     if (exp.startsWith("'") && exp.endsWith("'")) return exp.slice(1, -1);
 
-    // Replace variable names with their values
     varMap.forEach((v, k) => {
       const val = v.value || '0';
-      exp = exp.replace(new RegExp(`\\b${k}\\b`, 'g'), val);
+      const simpleName = k.includes(':') ? k.split(':')[1] : k;
+      exp = exp.replace(new RegExp(`\\b${simpleName}\\b`, 'g'), val);
     });
 
     try {
@@ -660,7 +1140,6 @@ export class ProgramSimulator {
         const res = Function(`"use strict"; return (${oldVal || 0}) * (${exp});`)();
         return String(res);
       }
-      // Direct assignment '='
       const res = Function(`"use strict"; return (${exp});`)();
       return String(res);
     } catch (e) {
@@ -668,46 +1147,7 @@ export class ProgramSimulator {
     }
   }
 
-  private static handleAssignment(
-    stmt: string,
-    varMap: Map<string, VariableBucket>,
-    varOrder: string[],
-    loopVar?: string,
-    loopVal?: number
-  ): string | undefined {
-    const match = stmt.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
-    if (!match) return undefined;
-
-    const varName = match[1];
-    const op = match[2];
-    let expr = match[3].trim();
-
-    if (loopVar) {
-      expr = expr.replace(new RegExp(`\\b${loopVar}\\b`, 'g'), String(loopVal));
-    }
-
-    if (!varMap.has(varName)) {
-      varOrder.push(varName);
-      varMap.set(varName, { name: varName, value: '' });
-    }
-
-    const b = varMap.get(varName)!;
-    const oldVal = b.value;
-    const newVal = this.evaluateExpression(expr, op, oldVal, varMap);
-
-    b.previousValue = oldVal;
-    b.value = newVal;
-    b.isModified = true;
-    b.isEmpty = false;
-    return varName;
-  }
-
-  private static evalCout(
-    stmt: string,
-    varMap: Map<string, VariableBucket>,
-    loopVar?: string,
-    loopVal?: number
-  ): string {
+  private static evalCout(stmt: string, varMap: Map<string, VariableBucket>): string {
     const cleaned = stmt.replace(/^cout\s*<<\s*/, '').replace(/;$/, '');
     const tokens = cleaned.split('<<').map(t => t.trim());
     let out = '';
@@ -719,16 +1159,19 @@ export class ProgramSimulator {
         out += tok.slice(1, -1);
       } else if (tok.startsWith("'") && tok.endsWith("'")) {
         out += tok.slice(1, -1);
-      } else if (loopVar && tok === loopVar) {
-        out += String(loopVal);
       } else if (varMap.has(tok)) {
         out += varMap.get(tok)!.value;
       } else {
-        out += tok;
+        // Try evaluation if expression
+        try {
+          const val = this.evaluateExpression(tok, '=', '', varMap);
+          out += val;
+        } catch (e) {
+          out += tok;
+        }
       }
     }
 
     return out;
   }
 }
-

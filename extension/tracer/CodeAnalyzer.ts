@@ -17,7 +17,12 @@ export class CodeAnalyzer {
    * 2. Starts at an empty state before allocations occur.
    * 3. Adapts strictly to what the code actually contains (Tree, Stack, Queue, Array, Linked List, or ordinary Flow).
    */
-  public static analyzeFile(filePath: string, fileName: string, langId: string): CodeAnalysisResult {
+  public static analyzeFile(
+    filePath: string,
+    fileName: string,
+    langId: string,
+    providedInputs: Record<string, string> = {}
+  ): CodeAnalysisResult {
     let code = '';
     try {
       code = fs.readFileSync(filePath, 'utf-8');
@@ -39,12 +44,13 @@ export class CodeAnalyzer {
     if (this.isLinkedList(code)) {
       return this.analyzeLinkedList(code, lines, fileName);
     }
-    if (this.isArray(code)) {
-      return this.analyzeArray(code, lines, fileName);
-    }
 
     if (ProgramSimulator.canSimulate(code)) {
-      return ProgramSimulator.simulate(code, lines, fileName);
+      return ProgramSimulator.simulate(code, lines, fileName, providedInputs);
+    }
+
+    if (this.isArray(code)) {
+      return this.analyzeArray(code, lines, fileName);
     }
 
     // Default: Clean Execution Flow (Functions, calculations, loops, if-else)
