@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { SessionData } from '../types';
 
 export function getWebviewHtml(session: SessionData, webview: vscode.Webview): string {
-  const sessionJson = JSON.stringify(session);
+  const sessionJson = JSON.stringify(session).replace(/</g, '\\u003c');
   const nonce = getNonce();
 
   return `<!DOCTYPE html>
@@ -818,6 +818,136 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       }
     }
 
+    /* ADAPTIVE LOOP GROUP CARD */
+    .loop-group-card {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+      border: 1.5px solid #6366f1;
+      border-radius: 12px;
+      padding: 16px 22px;
+      width: 480px;
+      max-width: 90vw;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 22px rgba(99, 102, 241, 0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .loop-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+      padding-bottom: 10px;
+    }
+
+    .loop-group-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(99, 102, 241, 0.2);
+      color: #818cf8;
+      border: 1px solid #6366f1;
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .loop-group-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f1f5f9;
+      flex: 1;
+    }
+
+    .expand-group-btn {
+      background: #4f46e5;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .expand-group-btn:hover {
+      background: #6366f1;
+      box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .loop-group-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .loop-group-desc {
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+
+    .group-deltas-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 4px 0;
+    }
+
+    .group-delta-item {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 5px 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .delta-var-name {
+      color: #38bdf8;
+      font-weight: 600;
+    }
+
+    .delta-start-val {
+      color: #94a3b8;
+    }
+
+    .delta-arrow {
+      color: #6366f1;
+      font-weight: 700;
+    }
+
+    .delta-end-val {
+      color: #10b981;
+      font-weight: 700;
+    }
+
+    .expanded-iter-pill {
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid #6366f1;
+      color: #a5b4fc;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
     /* CONDITION EVALUATION BANNER */
     .cond-eval-banner {
       background: rgba(15, 23, 42, 0.85);
@@ -1393,11 +1523,26 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     // Timeline Rendering
     function renderTimeline() {
       timelineNodes.innerHTML = '';
-      const total = session.steps.length;
+      const visibleSteps = (session.steps || []).filter(s => !s.isGroupCollapsed);
+      const totalVisible = visibleSteps.length;
+      let activeVisibleIndex = 0;
+
       session.steps.forEach((step, idx) => {
+        if (step.isGroupCollapsed) return;
+
+        const isCurrent = (idx === currentStepIndex);
+        const isPassed = (idx < currentStepIndex);
+        if (isCurrent || isPassed) {
+          activeVisibleIndex++;
+        }
+
         const dot = document.createElement('div');
-        dot.className = 'timeline-dot' + (idx === currentStepIndex ? ' active' : (idx < currentStepIndex ? ' passed' : ''));
-        dot.title = 'Step ' + (idx + 1) + ': ' + step.statement;
+        dot.className = 'timeline-dot' + (isCurrent ? ' active' : (isPassed ? ' passed' : ''));
+        if (step.loopGroup) {
+          dot.style.borderColor = '#6366f1';
+          if (isCurrent) dot.style.boxShadow = '0 0 10px #6366f1';
+        }
+        dot.title = 'Step ' + (step.stepIndex + 1) + ': ' + step.statement;
         dot.addEventListener('click', (e) => {
           e.stopPropagation();
           setStep(idx);
@@ -1405,8 +1550,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         timelineNodes.appendChild(dot);
       });
 
-      const pct = (currentStepIndex / Math.max(1, total - 1)) * 100;
-      timelineFill.style.width = pct + '%';
+      const pct = totalVisible > 1 ? ((activeVisibleIndex - 1) / (totalVisible - 1)) * 100 : 0;
+      timelineFill.style.width = Math.max(0, Math.min(100, pct)) + '%';
     }
 
     // Adaptive Canvas Renderer
@@ -1428,16 +1573,37 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         liveStmt.textContent = step.statement;
         liveLine.textContent = 'Line ' + step.line;
 
-        // Update Navigation
-        stepCounterText.textContent = 'Step ' + (currentStepIndex + 1) + ' of ' + session.steps.length;
-        backwardBtn.disabled = (currentStepIndex === 0);
-        forwardBtn.disabled = (currentStepIndex === session.steps.length - 1);
+        // Update Navigation (excluding collapsed steps)
+        const visibleSteps = (session.steps || []).filter(s => !s.isGroupCollapsed);
+        const visibleTotal = visibleSteps.length;
+        let visibleCurrent = 0;
+        for (let i = 0; i <= currentStepIndex && i < session.steps.length; i++) {
+          if (!session.steps[i].isGroupCollapsed) visibleCurrent++;
+        }
+        visibleCurrent = Math.max(1, visibleCurrent);
+
+        stepCounterText.textContent = 'Step ' + visibleCurrent + ' of ' + visibleTotal;
+
+        let hasPrev = false;
+        for (let i = currentStepIndex - 1; i >= 0; i--) {
+          if (!session.steps[i].isGroupCollapsed) { hasPrev = true; break; }
+        }
+        let hasNext = false;
+        for (let i = currentStepIndex + 1; i < session.steps.length; i++) {
+          if (!session.steps[i].isGroupCollapsed) { hasNext = true; break; }
+        }
+        backwardBtn.disabled = !hasPrev;
+        forwardBtn.disabled = !hasNext;
         renderTimeline();
 
         // Render Visual Structures
         nodesContainer.innerHTML = '';
-        if (step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || step.functionFrame || (step.arrayStructures && step.arrayStructures.length > 0)) {
-          if (step.functionFrame) {
+        if (step.loopGroup || step.belongsToGroupId || step.buckets || step.activeLoop || step.activeLoops || step.inputRequest || step.conditionEvent || step.functionFrame || (step.arrayStructures && step.arrayStructures.length > 0)) {
+          if (step.loopGroup) {
+            structureTypePill.textContent = 'Grouped Loop (' + step.loopGroup.totalGroupedIterations + ' iterations)';
+          } else if (step.belongsToGroupId) {
+            structureTypePill.textContent = 'Expanded Iteration ' + (step.iterationIndex !== undefined ? '#' + step.iterationIndex : '');
+          } else if (step.functionFrame) {
             structureTypePill.textContent = 'Function: ' + step.functionFrame.functionName + '()';
           } else if (step.activeLoop || (step.activeLoops && step.activeLoops.length > 0)) {
             structureTypePill.textContent = 'Loop Visualization';
@@ -1477,6 +1643,59 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       mainWrapper.style.flexDirection = 'column';
       mainWrapper.style.alignItems = 'center';
       mainWrapper.style.gap = '20px';
+
+      // 0. Adaptive Loop Group Card
+      if (step.loopGroup) {
+        const group = step.loopGroup;
+        const groupCard = document.createElement('div');
+        groupCard.className = 'loop-group-card';
+        groupCard.innerHTML = \`
+          <div class="loop-group-header">
+            <div class="loop-group-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              <span>\${group.loopType.toUpperCase()} LOOP</span>
+            </div>
+            <div class="loop-group-title">\${group.summaryText}</div>
+            <button class="expand-group-btn" id="expandGroupBtn">
+              \${group.isExpanded ? 'Collapse Group' : 'Expand Iterations (' + group.totalGroupedIterations + ')'}
+            </button>
+          </div>
+          <div class="loop-group-body">
+            <div class="loop-group-desc">\${step.explanation || 'Intermediate loop iterations grouped for clean visualization.'}</div>
+            <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform:uppercase; margin-top:4px;">Variable State Changes:</div>
+            <div class="group-deltas-grid">
+              \${group.variableDeltas.map(d => \`
+                <div class="group-delta-item">
+                  <span class="delta-var-name">\${d.name}</span>
+                  <span class="delta-start-val">\${d.startVal}</span>
+                  <span class="delta-arrow">➔</span>
+                  <span class="delta-end-val">\${d.endVal}</span>
+                </div>
+              \`).join('')}
+            </div>
+          </div>
+        \`;
+
+        const expandBtn = groupCard.querySelector('#expandGroupBtn');
+        if (expandBtn) {
+          expandBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            vscode.postMessage({ type: 'toggleGroupExpand', groupId: group.groupId });
+          });
+        }
+        mainWrapper.appendChild(groupCard);
+      }
+
+      // Indicator pill for individual expanded iteration
+      if (step.belongsToGroupId) {
+        const iterPill = document.createElement('div');
+        iterPill.className = 'expanded-iter-pill';
+        iterPill.innerHTML = \`
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
+          <span>Expanded Loop Iteration \${step.iterationIndex !== undefined ? '#' + step.iterationIndex : ''}</span>
+        \`;
+        mainWrapper.appendChild(iterPill);
+      }
 
       // 1. Condition & Branching Banner
       if (step.conditionEvent) {
@@ -1794,12 +2013,22 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
     backwardBtn.addEventListener('click', () => {
       pausePlayback();
-      if (currentStepIndex > 0) setStep(currentStepIndex - 1);
+      for (let i = currentStepIndex - 1; i >= 0; i--) {
+        if (!session.steps[i].isGroupCollapsed) {
+          setStep(i);
+          break;
+        }
+      }
     });
 
     forwardBtn.addEventListener('click', () => {
       pausePlayback();
-      if (currentStepIndex < session.steps.length - 1) setStep(currentStepIndex + 1);
+      for (let i = currentStepIndex + 1; i < session.steps.length; i++) {
+        if (!session.steps[i].isGroupCollapsed) {
+          setStep(i);
+          break;
+        }
+      }
     });
 
     timelineBar.addEventListener('click', (e) => {
@@ -1807,8 +2036,13 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       const rect = timelineBar.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-      const targetIndex = Math.round(ratio * (session.steps.length - 1));
-      setStep(targetIndex);
+      const visibleSteps = (session.steps || []).filter(s => !s.isGroupCollapsed);
+      if (visibleSteps.length === 0) return;
+      const targetVisibleIdx = Math.round(ratio * (visibleSteps.length - 1));
+      const targetStep = visibleSteps[targetVisibleIdx];
+      if (targetStep) {
+        setStep(targetStep.stepIndex);
+      }
     });
 
     playBtn.addEventListener('click', () => {
@@ -1869,11 +2103,26 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
           currentStepIndex = session.steps.length - 1;
           renderCanvas();
           break;
+        case 'groupToggled':
+          (session.steps || []).forEach(s => {
+            if (s.loopGroup && s.loopGroup.groupId === msg.groupId) {
+              s.loopGroup.isExpanded = msg.isExpanded;
+            }
+            if (s.belongsToGroupId === msg.groupId) {
+              s.isGroupCollapsed = !msg.isExpanded;
+            }
+          });
+          renderCanvas();
+          break;
       }
     });
 
-    renderCanvas();
-    vscode.postMessage({ type: 'ready' });
+    try {
+      renderCanvas();
+      vscode.postMessage({ type: 'ready' });
+    } catch (e) {
+      console.error('Fatal visualizer init error:', e);
+    }
   </script>
 </body>
 </html>`;

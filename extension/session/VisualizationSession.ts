@@ -238,6 +238,15 @@ export class VisualizationSession {
             // Deprecated fallback from webview
             this.handleTerminalInput(msg.value);
             break;
+          case 'toggleGroupExpand':
+            const isExp = this.history.toggleGroup(msg.groupId);
+            DiagnosticLogger.log('LOOP_GROUPING', `Toggled group "${msg.groupId}": isExpanded=${isExp}`);
+            this.panel.webview.postMessage({
+              type: 'groupToggled',
+              groupId: msg.groupId,
+              isExpanded: isExp
+            });
+            break;
         }
       },
       undefined,

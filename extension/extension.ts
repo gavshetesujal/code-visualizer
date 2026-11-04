@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 import { VisualizationSession } from './session/VisualizationSession';
+import { DiagnosticLogger } from './tracer/DiagnosticLogger';
 
 const SUPPORTED_LANGUAGES = ['c', 'cpp', 'python', 'java'];
 
 export function activate(context: vscode.ExtensionContext) {
+  DiagnosticLogger.initialize(context);
+
   // Dedicated Visualize command (triggered from the existing Run dropdown)
   const visualizeCommand = vscode.commands.registerCommand(
     'codeVisualizer.visualize',

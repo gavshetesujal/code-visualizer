@@ -36,6 +36,126 @@ export class ProgramSimulator {
     return hasVarDecl || hasLoop || hasCin || hasIf || hasAssign || hasFunc;
   }
 
+  /**
+   * Adaptive Loop Grouping:
+   * Intelligently groups middle iterations (iterations 4 to total - 3) into an interactive collapsible group.
+   * Preserves full program execution, variable accuracy, and individual inspection on demand.
+   */
+  private static applyAdaptiveLoopGrouping(
+    steps: ExecutionStep[],
+    loopId: string,
+    loopType: 'for' | 'while' | 'do-while',
+    loopVarName: string,
+    lineNum: number,
+    iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[]
+  ): void {
+    const totalIterations = iterationStepRanges.length;
+    // Only group when total iterations >= 8 (ensures at least 2 iterations in the middle: 4 to total - 3)
+    if (totalIterations < 8) {
+      return;
+    }
+
+    const startIter = 4;
+    const endIter = totalIterations - 3;
+    const totalGrouped = endIter - startIter + 1;
+
+    const firstMiddleRange = iterationStepRanges[startIter - 1]; // 0-indexed (index 3)
+    const lastMiddleRange = iterationStepRanges[endIter - 1];    // 0-indexed
+
+    if (!firstMiddleRange || !lastMiddleRange) {
+      return;
+    }
+
+    const firstMiddleStepIdx = firstMiddleRange.startIndex;
+    const lastMiddleStepIdx = lastMiddleRange.endIndex - 1;
+
+    if (firstMiddleStepIdx > lastMiddleStepIdx || firstMiddleStepIdx >= steps.length) {
+      return;
+    }
+
+    // Smart Handling (Requirement 5):
+    // Do not group if any step in middle iterations contains cin (inputRequest) or functionFrame!
+    for (let i = firstMiddleStepIdx; i <= lastMiddleStepIdx; i++) {
+      const s = steps[i];
+      if (s.inputRequest || s.functionFrame) {
+        DiagnosticLogger.log('LOOP_GROUPING', `Skipping loop grouping for ${loopId}: interactive event or function call detected in iteration range.`);
+        return;
+      }
+    }
+
+    // Compute variable deltas: compare buckets before iteration 4 vs buckets at end of endIter
+    const prevStep = steps[firstMiddleStepIdx - 1];
+    const endStep = steps[lastMiddleStepIdx];
+
+    const prevBuckets = prevStep?.buckets || [];
+    const endBuckets = endStep?.buckets || [];
+
+    const variableDeltas: { name: string; startVal: string; endVal: string }[] = [];
+    endBuckets.forEach(eb => {
+      const pb = prevBuckets.find(b => b.name === eb.name);
+      const startVal = pb ? pb.value : '';
+      const endVal = eb.value;
+      if (startVal !== endVal) {
+        variableDeltas.push({ name: eb.name, startVal, endVal });
+      }
+    });
+
+    if (loopVarName && !variableDeltas.some(d => d.name === loopVarName)) {
+      const pb = prevBuckets.find(b => b.name === loopVarName);
+      const eb = endBuckets.find(b => b.name === loopVarName);
+      if (pb && eb) {
+        variableDeltas.unshift({ name: loopVarName, startVal: pb.value, endVal: eb.value });
+      }
+    }
+
+    const groupId = `group_${loopId}_${startIter}_${endIter}`;
+    DiagnosticLogger.log('LOOP_GROUPING', `Grouped ${totalGrouped} iterations (${startIter}–${endIter}) into group "${groupId}"`);
+
+    // Create Group Header / Summary Step
+    const groupSummaryStep: ExecutionStep = {
+      stepIndex: 0,
+      totalSteps: 0,
+      line: lineNum,
+      statement: `Grouped Iterations ${startIter}–${endIter} (${totalGrouped} iterations)`,
+      explanation: `Adaptive Loop: Grouped ${totalGrouped} intermediate iterations for clean visualization. Variable changes: ${variableDeltas.map(d => `${d.name}: ${d.startVal} ➔ ${d.endVal}`).join(', ')}. Click "Expand" to inspect each iteration.`,
+      callStack: endStep ? endStep.callStack : [],
+      heap: [],
+      variables: [],
+      memoryDump: [],
+      output: endStep ? endStep.output : '',
+      buckets: endStep ? endStep.buckets : [],
+      activeLoop: endStep ? endStep.activeLoop : undefined,
+      activeLoops: endStep ? endStep.activeLoops : undefined,
+      isGroupHeader: true,
+      loopGroup: {
+        groupId,
+        loopId,
+        loopType,
+        startIteration: startIter,
+        endIteration: endIter,
+        totalGroupedIterations: totalGrouped,
+        isExpanded: false,
+        variableDeltas,
+        summaryText: `Iterations ${startIter}–${endIter} (${totalGrouped} iterations grouped)`
+      }
+    };
+
+    // Mark all steps in the middle iterations as belonging to this group and collapsed
+    for (let sIdx = firstMiddleStepIdx; sIdx <= lastMiddleStepIdx; sIdx++) {
+      steps[sIdx].belongsToGroupId = groupId;
+      steps[sIdx].isGroupCollapsed = true;
+    }
+
+    // Insert groupSummaryStep immediately before the first middle step
+    steps.splice(firstMiddleStepIdx, 0, groupSummaryStep);
+
+    // Re-index all steps
+    steps.forEach((s, idx) => {
+      s.stepIndex = idx;
+      s.totalSteps = steps.length;
+    });
+  }
+
   public static simulate(
     code: string,
     lines: string[],
@@ -237,10 +357,13 @@ export class ProgramSimulator {
             { modifiedVar: loopVarName }
           );
 
+          const iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[] = [];
+          const SAFEGUARD_MAX_ITERATIONS = 10000;
           let iteration = 1;
-          const maxIterations = 20;
 
-          while (iteration <= maxIterations) {
+          while (iteration <= SAFEGUARD_MAX_ITERATIONS) {
+            const iterStart = steps.length;
+
             // Step 2: Condition
             const condPassed = this.evalCondition(condPart, loopVarName, loopVarVal, varMap);
             loopState.phase = 'condition';
@@ -279,6 +402,8 @@ export class ProgramSimulator {
             loopState.phase = 'body';
             executeStatements(bodyLines, `${scopeName}_loop`);
             if (isWaitingForInput) {
+              const iterEnd = steps.length;
+              iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
               break;
             }
 
@@ -305,10 +430,30 @@ export class ProgramSimulator {
               { modifiedVar: loopVarName }
             );
 
+            const iterEnd = steps.length;
+            iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
             iteration++;
           }
 
+          if (iteration > SAFEGUARD_MAX_ITERATIONS) {
+            recordStep(
+              cur.lineNum,
+              `Safeguard limit reached (${SAFEGUARD_MAX_ITERATIONS} iterations)`,
+              `Execution safeguard: Loop reached maximum safety threshold of ${SAFEGUARD_MAX_ITERATIONS} iterations to prevent freezing.`
+            );
+          }
+
           activeLoopStack.pop();
+
+          // Apply adaptive loop grouping to intermediate iterations
+          ProgramSimulator.applyAdaptiveLoopGrouping(
+            steps,
+            loopId,
+            'for',
+            loopVarName,
+            cur.lineNum,
+            iterationStepRanges
+          );
           continue;
         }
 
@@ -341,10 +486,12 @@ export class ProgramSimulator {
 
           activeLoopStack.push(loopState);
 
+          const iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[] = [];
+          const SAFEGUARD_MAX_ITERATIONS = 10000;
           let iteration = 1;
-          const maxIterations = 20;
 
-          while (iteration <= maxIterations) {
+          while (iteration <= SAFEGUARD_MAX_ITERATIONS) {
+            const iterStart = steps.length;
             const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
             const condPassed = this.evalCondition(condPart, loopVarName, curValNum, varMap);
             loopState.phase = 'condition';
@@ -377,6 +524,8 @@ export class ProgramSimulator {
             previousValues.push(String(curValNum));
             loopState.phase = 'body';
             executeStatements(bodyLines, `${scopeName}_while`);
+            const iterEnd = steps.length;
+            iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
             if (isWaitingForInput) {
               break;
             }
@@ -384,7 +533,25 @@ export class ProgramSimulator {
             iteration++;
           }
 
+          if (iteration > SAFEGUARD_MAX_ITERATIONS) {
+            recordStep(
+              cur.lineNum,
+              `Safeguard limit reached (${SAFEGUARD_MAX_ITERATIONS} iterations)`,
+              `Execution safeguard: Loop reached maximum safety threshold of ${SAFEGUARD_MAX_ITERATIONS} iterations to prevent freezing.`
+            );
+          }
+
           activeLoopStack.pop();
+
+          // Apply adaptive loop grouping to intermediate iterations
+          ProgramSimulator.applyAdaptiveLoopGrouping(
+            steps,
+            loopId,
+            'while',
+            loopVarName,
+            cur.lineNum,
+            iterationStepRanges
+          );
           continue;
         }
 
@@ -429,16 +596,20 @@ export class ProgramSimulator {
 
           activeLoopStack.push(loopState);
 
+          const iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[] = [];
+          const SAFEGUARD_MAX_ITERATIONS = 10000;
           let iteration = 1;
-          const maxIterations = 20;
 
-          while (iteration <= maxIterations) {
+          while (iteration <= SAFEGUARD_MAX_ITERATIONS) {
+            const iterStart = steps.length;
             // In C++, do-while executes body first!
             loopState.phase = 'body';
             loopState.iteration = iteration;
             recordStep(cur.lineNum, `do { ... } [Iteration ${iteration}]`, `Executing do-while loop body (Iteration ${iteration}).`);
             executeStatements(bodyLines, `${scopeName}_dowhile`);
             if (isWaitingForInput) {
+              const iterEnd = steps.length;
+              iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
               break;
             }
 
@@ -465,6 +636,9 @@ export class ProgramSimulator {
               }
             );
 
+            const iterEnd = steps.length;
+            iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
+
             if (!condPassed) {
               loopState.phase = 'exit';
               loopState.isExiting = true;
@@ -475,7 +649,25 @@ export class ProgramSimulator {
             iteration++;
           }
 
+          if (iteration > SAFEGUARD_MAX_ITERATIONS) {
+            recordStep(
+              cur.lineNum,
+              `Safeguard limit reached (${SAFEGUARD_MAX_ITERATIONS} iterations)`,
+              `Execution safeguard: Loop reached maximum safety threshold of ${SAFEGUARD_MAX_ITERATIONS} iterations to prevent freezing.`
+            );
+          }
+
           activeLoopStack.pop();
+
+          // Apply adaptive loop grouping to intermediate iterations
+          ProgramSimulator.applyAdaptiveLoopGrouping(
+            steps,
+            loopId,
+            'do-while',
+            loopVarName,
+            cur.lineNum,
+            iterationStepRanges
+          );
           continue;
         }
 

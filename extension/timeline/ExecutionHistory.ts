@@ -6,9 +6,17 @@ export class ExecutionHistory {
   private playbackTimer: NodeJS.Timeout | null = null;
   private playbackSpeed: number = 1.0;
   private onStepChanged?: (step: ExecutionStep) => void;
+  private expandedGroups: Set<string> = new Set<string>();
 
   constructor(steps: ExecutionStep[], initialIndex = 0) {
     this.steps = steps;
+    // Initialize any explicitly expanded groups from steps
+    this.steps.forEach(s => {
+      if (s.loopGroup && s.loopGroup.isExpanded) {
+        this.expandedGroups.add(s.loopGroup.groupId);
+      }
+    });
+
     this.currentIndex = Math.max(0, Math.min(initialIndex, steps.length - 1));
   }
 
@@ -28,22 +36,67 @@ export class ExecutionHistory {
     return this.steps.length;
   }
 
+  /**
+   * Checks whether a step is visible given current group expansion state
+   */
+  public isStepVisible(step: ExecutionStep): boolean {
+    if (!step) return false;
+    if (step.belongsToGroupId) {
+      return this.expandedGroups.has(step.belongsToGroupId);
+    }
+    return true;
+  }
+
+  public getVisibleSteps(): ExecutionStep[] {
+    return this.steps.filter(s => this.isStepVisible(s));
+  }
+
+  public getTotalVisibleSteps(): number {
+    return this.getVisibleSteps().length;
+  }
+
+  public getVisibleIndex(absoluteIndex: number): number {
+    let count = 0;
+    for (let i = 0; i <= absoluteIndex && i < this.steps.length; i++) {
+      if (this.isStepVisible(this.steps[i])) {
+        count++;
+      }
+    }
+    return Math.max(1, count);
+  }
+
   public canGoBack(): boolean {
-    return this.currentIndex > 0;
+    for (let i = this.currentIndex - 1; i >= 0; i--) {
+      if (this.isStepVisible(this.steps[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public canGoForward(): boolean {
-    return this.currentIndex < this.steps.length - 1;
+    for (let i = this.currentIndex + 1; i < this.steps.length; i++) {
+      if (this.isStepVisible(this.steps[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public previous(): ExecutionStep | null {
     if (!this.canGoBack()) {
       return null;
     }
-    this.currentIndex--;
-    const step = this.getCurrentStep();
-    this.notify();
-    return step;
+    let target = this.currentIndex - 1;
+    while (target >= 0 && !this.isStepVisible(this.steps[target])) {
+      target--;
+    }
+    if (target >= 0) {
+      this.currentIndex = target;
+      this.notify();
+      return this.getCurrentStep();
+    }
+    return null;
   }
 
   public next(): ExecutionStep | null {
@@ -51,10 +104,16 @@ export class ExecutionHistory {
       this.pause();
       return null;
     }
-    this.currentIndex++;
-    const step = this.getCurrentStep();
-    this.notify();
-    return step;
+    let target = this.currentIndex + 1;
+    while (target < this.steps.length && !this.isStepVisible(this.steps[target])) {
+      target++;
+    }
+    if (target < this.steps.length) {
+      this.currentIndex = target;
+      this.notify();
+      return this.getCurrentStep();
+    }
+    return null;
   }
 
   public goTo(index: number): ExecutionStep {
@@ -63,6 +122,34 @@ export class ExecutionHistory {
     const step = this.getCurrentStep();
     this.notify();
     return step;
+  }
+
+  /**
+   * Toggles expansion state of a loop group
+   */
+  public toggleGroup(groupId: string): boolean {
+    if (this.expandedGroups.has(groupId)) {
+      this.expandedGroups.delete(groupId);
+    } else {
+      this.expandedGroups.add(groupId);
+    }
+
+    const isExpanded = this.expandedGroups.has(groupId);
+    this.steps.forEach(s => {
+      if (s.loopGroup && s.loopGroup.groupId === groupId) {
+        s.loopGroup.isExpanded = isExpanded;
+      }
+      if (s.belongsToGroupId === groupId) {
+        s.isGroupCollapsed = !isExpanded;
+      }
+    });
+
+    this.notify();
+    return isExpanded;
+  }
+
+  public isGroupExpanded(groupId: string): boolean {
+    return this.expandedGroups.has(groupId);
   }
 
   public restart(): ExecutionStep {
@@ -125,4 +212,3 @@ export class ExecutionHistory {
     }
   }
 }
-

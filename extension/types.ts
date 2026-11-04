@@ -151,6 +151,18 @@ export interface FunctionCallFrame {
   callDepth: number;
 }
 
+export interface LoopIterationGroup {
+  groupId: string;
+  loopId: string;
+  loopType: 'for' | 'while' | 'do-while';
+  startIteration: number;
+  endIteration: number;
+  totalGroupedIterations: number;
+  isExpanded: boolean;
+  variableDeltas: { name: string; startVal: string; endVal: string }[];
+  summaryText: string;
+}
+
 export interface ArrayMemoryCell {
   index: number;
   label: string; // e.g. "arr[0]"
@@ -184,6 +196,11 @@ export interface ExecutionStep {
   conditionEvent?: ConditionBranchEvent;
   functionFrame?: FunctionCallFrame;
   arrayStructures?: ArrayMemoryStructure[];
+  loopGroup?: LoopIterationGroup;
+  isGroupHeader?: boolean;
+  belongsToGroupId?: string;
+  isGroupCollapsed?: boolean;
+  iterationIndex?: number;
 }
 
 export interface SessionData {
@@ -203,9 +220,11 @@ export type WebviewToExtensionMessage =
   | { type: 'restart' }
   | { type: 'speedChange'; speed: number }
   | { type: 'selectNode'; nodeId: string; line?: number }
-  | { type: 'submitInput'; variableName: string; value: string; stepIndex: number };
+  | { type: 'submitInput'; variableName: string; value: string; stepIndex: number }
+  | { type: 'toggleGroupExpand'; groupId: string };
 
 export type ExtensionToWebviewMessage =
   | { type: 'init'; session: SessionData }
   | { type: 'setStep'; stepIndex: number }
-  | { type: 'appendStep'; step: ExecutionStep };
+  | { type: 'appendStep'; step: ExecutionStep }
+  | { type: 'groupToggled'; groupId: string; isExpanded: boolean };

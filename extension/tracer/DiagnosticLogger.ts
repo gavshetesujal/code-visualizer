@@ -42,3 +42,4 @@ export class DiagnosticLogger {
     this.channel?.show(true);
   }
 }
+
