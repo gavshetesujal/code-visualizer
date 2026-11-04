@@ -81,7 +81,7 @@ export class VisualizationSession {
 
     if (existing) {
       existing.panel.reveal(vscode.ViewColumn.Beside, true);
-      existing.syncEditorDecoration();
+      await existing.switchToFile(editor);
       return existing;
     }
 

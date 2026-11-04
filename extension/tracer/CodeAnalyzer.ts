@@ -22,13 +22,16 @@ export class CodeAnalyzer {
     fileName: string,
     langId: string,
     providedInputs: Record<string, string> = {},
-    orderedInputs: string[] = []
+    orderedInputs: string[] = [],
+    sourceCode?: string
   ): CodeAnalysisResult {
-    let code = '';
-    try {
-      code = fs.readFileSync(filePath, 'utf-8');
-    } catch (e) {
-      return this.createEmptyFlow(fileName);
+    let code = typeof sourceCode === 'string' && sourceCode.length > 0 ? sourceCode : '';
+    if (!code) {
+      try {
+        code = fs.readFileSync(filePath, 'utf-8');
+      } catch (e) {
+        return this.createEmptyFlow(fileName);
+      }
     }
 
     const lines = code.split('\n');

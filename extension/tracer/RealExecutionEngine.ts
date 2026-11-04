@@ -21,18 +21,19 @@ export class RealExecutionEngine {
     const filePath = document.fileName;
     const fileName = path.basename(filePath);
     const langId = document.languageId;
+    const sourceCode = document.getText();
 
     switch (langId) {
       case 'python':
         return await this.tracePython(filePath, fileName, userInputs);
       case 'c':
       case 'cpp':
-        return await this.traceNativeCpp(filePath, fileName, langId, userInputs, providedInputs, orderedInputs);
+        return await this.traceNativeCpp(filePath, fileName, langId, userInputs, providedInputs, orderedInputs, sourceCode);
       case 'java':
-        return await this.traceJava(filePath, fileName, userInputs);
+        return await this.traceJava(filePath, fileName, userInputs, sourceCode);
       default:
         // Use static and semantic code analyzer for any other file
-        const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId, providedInputs, orderedInputs);
+        const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId, providedInputs, orderedInputs, sourceCode);
         return {
           fileName,
           filePath,
@@ -107,10 +108,11 @@ export class RealExecutionEngine {
     langId: string,
     userInputs: string[],
     providedInputs: Record<string, string> = {},
-    orderedInputs: string[] = []
+    orderedInputs: string[] = [],
+    sourceCode?: string
   ): Promise<SessionData> {
     // Dynamically analyze code to identify exactly what data structures or flow are in the file
-    const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId, providedInputs, orderedInputs);
+    const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, langId, providedInputs, orderedInputs, sourceCode);
 
     return {
       fileName,
@@ -125,8 +127,13 @@ export class RealExecutionEngine {
   /**
    * Real Java execution tracer
    */
-  private static async traceJava(filePath: string, fileName: string, userInputs: string[]): Promise<SessionData> {
-    const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, 'java');
+  private static async traceJava(
+    filePath: string,
+    fileName: string,
+    userInputs: string[],
+    sourceCode?: string
+  ): Promise<SessionData> {
+    const analysis = CodeAnalyzer.analyzeFile(filePath, fileName, 'java', {}, [], sourceCode);
 
     return {
       fileName,
