@@ -3,7 +3,6 @@ import * as path from 'path';
 import { SessionData, WebviewToExtensionMessage } from '../types';
 import { ExecutionHistory } from '../timeline/ExecutionHistory';
 import { RealExecutionEngine } from '../tracer/RealExecutionEngine';
-import { MockDataGenerator } from '../timeline/MockDataGenerator';
 import { getWebviewHtml } from '../webview/getWebviewHtml';
 
 export class VisualizationSession {
@@ -11,7 +10,7 @@ export class VisualizationSession {
 
   public readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
-  private readonly documentUri: vscode.Uri;
+  private documentUri: vscode.Uri;
   private history: ExecutionHistory;
   private sessionData: SessionData;
   private lineDecoration: vscode.TextEditorDecorationType;
@@ -76,20 +75,8 @@ export class VisualizationSession {
       return existing;
     }
 
-    const fileName = path.basename(editor.document.fileName);
-    const langId = editor.document.languageId;
-
-    let sessionData: SessionData;
-    try {
-      sessionData = await RealExecutionEngine.executeAndTrace(editor.document);
-    } catch (err: any) {
-      sessionData = MockDataGenerator.generateSession(
-        fileName,
-        editor.document.fileName,
-        langId
-      );
-    }
-
+    // Execute and analyze the actual selected file
+    const sessionData = await RealExecutionEngine.executeAndTrace(editor.document);
     const session = new VisualizationSession(context, editor, sessionData);
     this.activeSessions.set(key, session);
     return session;
@@ -100,16 +87,36 @@ export class VisualizationSession {
   }
 
   /**
-   * Runs the actual program inside VS Code's integrated terminal at the bottom.
-   * All cin, cout, input() and user typing happens naturally in this existing terminal.
+   * Switches to a new active editor file, completely clearing any previous stale states
+   */
+  public async switchToFile(editor: vscode.TextEditor) {
+    this.documentUri = editor.document.uri;
+    const fileName = path.basename(editor.document.fileName);
+
+    this.panel.title = `Visualize: ${fileName}`;
+    this.sessionData = await RealExecutionEngine.executeAndTrace(editor.document);
+
+    this.history.dispose();
+    this.history = new ExecutionHistory(this.sessionData.steps, 0);
+
+    // Send fresh session context to webview (clears old nodes & titles)
+    this.panel.webview.postMessage({
+      type: 'init',
+      session: this.sessionData
+    });
+
+    this.syncEditorDecoration();
+    this.runInIntegratedTerminal(editor.document);
+  }
+
+  /**
+   * Runs the program in the existing native VS Code integrated terminal
    */
   private runInIntegratedTerminal(document: vscode.TextDocument) {
     const filePath = document.fileName;
     const fileDir = path.dirname(filePath);
-    const fileName = path.basename(filePath);
     const langId = document.languageId;
 
-    // Reuse or create an integrated terminal named "Code Visualizer"
     const terminalName = 'Code Visualizer';
     this.executionTerminal = vscode.window.terminals.find(t => t.name === terminalName);
     if (!this.executionTerminal) {
@@ -119,10 +126,8 @@ export class VisualizationSession {
       });
     }
 
-    // Show the existing bottom terminal
     this.executionTerminal.show(true);
 
-    // Send the appropriate execution command to the existing terminal
     if (langId === 'python') {
       this.executionTerminal.sendText(`python3 "${filePath}"`);
     } else if (langId === 'cpp') {
@@ -178,11 +183,18 @@ export class VisualizationSession {
       this.context.subscriptions
     );
 
-    // Keep line decorations in sync if the user switches active editor tabs
+    // Automatically switch and reload whenever user switches editor file tabs
     vscode.window.onDidChangeActiveTextEditor(
-      editor => {
-        if (editor && editor.document.uri.toString() === this.documentUri.toString()) {
-          this.syncEditorDecoration();
+      async editor => {
+        if (editor && editor.document.uri.scheme === 'file') {
+          const supported = ['c', 'cpp', 'python', 'java'];
+          if (supported.includes(editor.document.languageId)) {
+            if (editor.document.uri.toString() !== this.documentUri.toString()) {
+              await this.switchToFile(editor);
+            } else {
+              this.syncEditorDecoration();
+            }
+          }
         }
       },
       undefined,
