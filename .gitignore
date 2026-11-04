@@ -1,0 +1,10 @@
+node_modules/
+out/
+bin/
+*.class
+test
+test_cpp
+*.dSYM
+._*
+.DS_Store
+Code Visualizer/

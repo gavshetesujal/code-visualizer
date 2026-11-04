@@ -1,0 +1,53 @@
+{
+  "name": "code-visualizer",
+  "displayName": "Code Visualizer",
+  "description": "Interactive 2D & 3D program visualization, step-by-step memory tracking, and execution insights for C, C++, Python, and Java.",
+  "version": "0.1.0",
+  "publisher": "CodeVisualizerTeam",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Education",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:c",
+    "onLanguage:cpp",
+    "onLanguage:python",
+    "onLanguage:java",
+    "onCommand:codeVisualizer.visualize"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeVisualizer.visualize",
+        "title": "Visualize",
+        "category": "Code Visualizer",
+        "icon": "$(graph)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "codeVisualizer.visualize",
+          "group": "navigation@1",
+          "when": "resourceLangId == 'c' || resourceLangId == 'cpp' || resourceLangId == 'python' || resourceLangId == 'java'"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./tsconfig.json",
+    "watch": "tsc -watch -p ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

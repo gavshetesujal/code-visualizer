@@ -1,0 +1,26 @@
+{
+  "terminal.integrated.env.osx": {
+    "PATH": "/opt/homebrew/opt/openjdk/bin:${env:PATH}"
+  },
+  "C_Cpp.default.compilerPath": "/usr/bin/clang",
+  "C_Cpp.default.cStandard": "c17",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.intelliSenseMode": "macos-clang-arm64",
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+  "python.analysis.typeCheckingMode": "basic",
+  "java.jdt.ls.java.home": "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-26",
+      "path": "/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home",
+      "default": true
+    }
+  ],
+  "java.project.outputPath": "bin",
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/bin/*.dSYM": true
+  }
+}
+

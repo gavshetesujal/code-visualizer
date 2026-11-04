@@ -1,0 +1,128 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Auto Debug (Current File)",
+      "type": "auto-debug",
+      "request": "launch",
+      "map": {
+        "**/*.java": "Debug Java (Current File)",
+        "**/*.py": "Debug Python (Current File)",
+        "**/*.cpp": "Debug C++ (CodeLLDB)",
+        "**/*.cc": "Debug C++ (CodeLLDB)",
+        "**/*.cxx": "Debug C++ (CodeLLDB)",
+        "**/*.c": "Debug C (CodeLLDB)"
+      }
+    },
+    {
+      "name": "Run Code Visualizer Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "preLaunchTask": "Compile Code Visualizer Extension"
+    },
+    {
+      "name": "Debug Java (Current File)",
+      "type": "java",
+      "request": "launch",
+      "mainClass": "${file}"
+    },
+    {
+      "name": "Debug C (CodeLLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build Active C File",
+      "stopOnEntry": false,
+      "terminal": "integrated"
+    },
+    {
+      "name": "Debug C++ (CodeLLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build Active C++ File",
+      "stopOnEntry": false,
+      "terminal": "integrated"
+    },
+    {
+      "name": "Debug C (Official C/C++ Extension cppdbg)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "preLaunchTask": "Build Active C File"
+    },
+    {
+      "name": "Debug C++ (Official C/C++ Extension cppdbg)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/${fileBasenameNoExtension}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "preLaunchTask": "Build Active C++ File"
+    },
+    {
+      "name": "Debug Python (Current File)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Debug Java (src/java/Main.java)",
+      "type": "java",
+      "request": "launch",
+      "mainClass": "${workspaceFolder}/src/java/Main.java"
+    },
+    {
+      "name": "Debug C (src/c/main.c)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/main_c",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build C (src/c/main.c)",
+      "stopOnEntry": false,
+      "terminal": "integrated"
+    },
+    {
+      "name": "Debug C++ (src/cpp/main.cpp)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/main_cpp",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build C++ (src/cpp/main.cpp)",
+      "stopOnEntry": false,
+      "terminal": "integrated"
+    },
+    {
+      "name": "Debug Python (src/python/main.py)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/python/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "darrenlevine.auto-debug",
+    "ms-vscode.cpptools",
+    "vadimcn.vscode-lldb",
+    "ms-vscode.cmake-tools",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-python.debugpy",
+    "vscjava.vscode-java-pack",
+    "redhat.java",
+    "vscjava.vscode-java-debug",
+    "vscjava.vscode-java-test"
+  ]
+}

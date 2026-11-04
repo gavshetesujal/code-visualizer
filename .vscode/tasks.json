@@ -1,0 +1,205 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Clean Bin Directory",
+      "type": "shell",
+      "command": "rm -rf \"${workspaceFolder}/bin/\"* && mkdir -p \"${workspaceFolder}/bin\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent"
+      }
+    },
+    {
+      "label": "Compile Code Visualizer Extension",
+      "type": "shell",
+      "command": "npm run compile",
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "label": "Build Active C File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".c\" ]]; then echo \"Error: '${fileBasename}' is not a C source file (.c)\"; exit 1; fi && mkdir -p \"${workspaceFolder}/bin\" && rm -f \"${workspaceFolder}/bin/${fileBasenameNoExtension}\" && clang -g -Wall -Wextra \"${file}\" -o \"${workspaceFolder}/bin/${fileBasenameNoExtension}\"",
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Run Active C File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".c\" ]]; then echo \"Error: '${fileBasename}' is not a C source file (.c)\"; exit 1; fi && \"${workspaceFolder}/bin/${fileBasenameNoExtension}\"",
+      "dependsOn": "Build Active C File",
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build Active C++ File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".cpp\" && \"${fileExtname}\" != \".cc\" && \"${fileExtname}\" != \".cxx\" ]]; then echo \"Error: '${fileBasename}' is not a C++ source file (.cpp/.cc/.cxx)\"; exit 1; fi && mkdir -p \"${workspaceFolder}/bin\" && rm -f \"${workspaceFolder}/bin/${fileBasenameNoExtension}\" && clang++ -std=c++17 -g -Wall -Wextra \"${file}\" -o \"${workspaceFolder}/bin/${fileBasenameNoExtension}\"",
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Run Active C++ File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".cpp\" && \"${fileExtname}\" != \".cc\" && \"${fileExtname}\" != \".cxx\" ]]; then echo \"Error: '${fileBasename}' is not a C++ source file (.cpp/.cc/.cxx)\"; exit 1; fi && \"${workspaceFolder}/bin/${fileBasenameNoExtension}\"",
+      "dependsOn": "Build Active C++ File",
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Run Active Python File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".py\" ]]; then echo \"Error: '${fileBasename}' is not a Python source file (.py)\"; exit 1; fi && /usr/bin/python3 -u \"${file}\"",
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build Active Java File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".java\" ]]; then echo \"Error: '${fileBasename}' is not a Java source file (.java)\"; exit 1; fi && mkdir -p \"${workspaceFolder}/bin\" && rm -f \"${workspaceFolder}/bin/${fileBasenameNoExtension}.class\" && /opt/homebrew/opt/openjdk/bin/javac -g -d \"${workspaceFolder}/bin\" \"${file}\"",
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": [
+        "$javac"
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Run Active Java File",
+      "type": "shell",
+      "command": "if [[ \"${fileExtname}\" != \".java\" ]]; then echo \"Error: '${fileBasename}' is not a Java source file (.java)\"; exit 1; fi && /opt/homebrew/opt/openjdk/bin/java -cp \"${workspaceFolder}/bin\" \"${fileBasenameNoExtension}\"",
+      "dependsOn": "Build Active Java File",
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build C (src/c/main.c)",
+      "type": "shell",
+      "command": "mkdir -p \"${workspaceFolder}/bin\" && rm -f \"${workspaceFolder}/bin/main_c\" && clang -g -Wall -Wextra \"${workspaceFolder}/src/c/main.c\" -o \"${workspaceFolder}/bin/main_c\"",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Run C (src/c/main.c)",
+      "type": "shell",
+      "command": "\"${workspaceFolder}/bin/main_c\"",
+      "dependsOn": "Build C (src/c/main.c)",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "Build C++ (src/cpp/main.cpp)",
+      "type": "shell",
+      "command": "mkdir -p \"${workspaceFolder}/bin\" && rm -f \"${workspaceFolder}/bin/main_cpp\" && clang++ -std=c++17 -g -Wall -Wextra \"${workspaceFolder}/src/cpp/main.cpp\" -o \"${workspaceFolder}/bin/main_cpp\"",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Run C++ (src/cpp/main.cpp)",
+      "type": "shell",
+      "command": "\"${workspaceFolder}/bin/main_cpp\"",
+      "dependsOn": "Build C++ (src/cpp/main.cpp)",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "Run Python (src/python/main.py)",
+      "type": "shell",
+      "command": "/usr/bin/python3 -u \"${workspaceFolder}/src/python/main.py\"",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "Build Java (src/java/Main.java)",
+      "type": "shell",
+      "command": "mkdir -p \"${workspaceFolder}/bin\" && rm -f \"${workspaceFolder}/bin/Main.class\" && /opt/homebrew/opt/openjdk/bin/javac -g -d \"${workspaceFolder}/bin\" \"${workspaceFolder}/src/java/Main.java\"",
+      "problemMatcher": [
+        "$javac"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Run Java (src/java/Main.java)",
+      "type": "shell",
+      "command": "/opt/homebrew/opt/openjdk/bin/java -cp \"${workspaceFolder}/bin\" Main",
+      "dependsOn": "Build Java (src/java/Main.java)",
+      "problemMatcher": [],
+      "group": "test"
+    }
+  ]
+}
