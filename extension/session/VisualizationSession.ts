@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { SessionData, WebviewToExtensionMessage } from '../types';
 import { ExecutionHistory } from '../timeline/ExecutionHistory';
+import { RealExecutionEngine } from '../tracer/RealExecutionEngine';
 import { MockDataGenerator } from '../timeline/MockDataGenerator';
 import { getWebviewHtml } from '../webview/getWebviewHtml';
 
@@ -11,22 +12,20 @@ export class VisualizationSession {
   public readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
   private readonly documentUri: vscode.Uri;
-  private readonly history: ExecutionHistory;
-  private readonly sessionData: SessionData;
+  private history: ExecutionHistory;
+  private sessionData: SessionData;
   private lineDecoration: vscode.TextEditorDecorationType;
 
-  private constructor(context: vscode.ExtensionContext, editor: vscode.TextEditor) {
+  private constructor(
+    context: vscode.ExtensionContext,
+    editor: vscode.TextEditor,
+    initialData: SessionData
+  ) {
     this.context = context;
     this.documentUri = editor.document.uri;
+    this.sessionData = initialData;
 
     const fileName = path.basename(editor.document.fileName);
-    const langId = editor.document.languageId;
-
-    this.sessionData = MockDataGenerator.generateSession(
-      fileName,
-      editor.document.fileName,
-      langId
-    );
 
     this.history = new ExecutionHistory(this.sessionData.steps, 0);
 
@@ -62,7 +61,10 @@ export class VisualizationSession {
     this.syncEditorDecoration();
   }
 
-  public static createOrReveal(context: vscode.ExtensionContext, editor: vscode.TextEditor): VisualizationSession {
+  public static async createOrReveal(
+    context: vscode.ExtensionContext,
+    editor: vscode.TextEditor
+  ): Promise<VisualizationSession> {
     const key = editor.document.uri.toString();
     const existing = this.activeSessions.get(key);
 
@@ -72,7 +74,26 @@ export class VisualizationSession {
       return existing;
     }
 
-    const session = new VisualizationSession(context, editor);
+    const fileName = path.basename(editor.document.fileName);
+    const langId = editor.document.languageId;
+
+    // Execute real user program using RealExecutionEngine
+    let sessionData: SessionData;
+    try {
+      vscode.window.showInformationMessage(`Code Visualizer: Executing and tracing ${fileName}...`);
+      sessionData = await RealExecutionEngine.executeAndTrace(editor.document);
+    } catch (err: any) {
+      vscode.window.showWarningMessage(
+        `Code Visualizer: Real tracer notice: ${err?.message || err}. Using prototype mode.`
+      );
+      sessionData = MockDataGenerator.generateSession(
+        fileName,
+        editor.document.fileName,
+        langId
+      );
+    }
+
+    const session = new VisualizationSession(context, editor, sessionData);
     this.activeSessions.set(key, session);
     return session;
   }
