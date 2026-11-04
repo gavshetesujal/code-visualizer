@@ -789,71 +789,33 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
     }
 
-    /* CIN INPUT PROMPT OVERLAY */
-    .cin-input-card {
-      background: #0f172a;
-      border: 2px solid #f59e0b;
-      border-radius: 14px;
-      padding: 16px 20px;
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 25px rgba(245, 158, 11, 0.3);
+    /* TERMINAL WAITING BADGE (Points to native VS Code integrated terminal) */
+    .terminal-waiting-badge {
+      background: rgba(15, 23, 42, 0.95);
+      border: 1.5px solid #f59e0b;
+      border-radius: 10px;
+      padding: 10px 18px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 16px rgba(245, 158, 11, 0.25);
       display: flex;
-      flex-direction: column;
-      gap: 12px;
-      width: 340px;
-      margin: 16px auto;
+      align-items: center;
+      gap: 10px;
+      color: #fbbf24;
+      font-size: 13px;
+      font-weight: 600;
+      margin: 12px auto;
       z-index: 10;
+      animation: pulseTerminalWait 2s infinite ease-in-out;
     }
 
-    .cin-prompt-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: #f59e0b;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
-
-    .cin-input-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .cin-input-field {
-      flex: 1;
-      background: #080c14;
-      border: 1px solid #334155;
-      color: #ffffff;
-      font-family: var(--font-mono);
-      font-size: 14px;
-      padding: 8px 12px;
-      border-radius: 6px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .cin-input-field:focus {
-      border-color: #f59e0b;
-      box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
-    }
-
-    .cin-submit-btn {
-      background: #f59e0b;
-      color: #04101e;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-      white-space: nowrap;
-    }
-
-    .cin-submit-btn:hover {
-      background: #d97706;
-      transform: translateY(-1px);
+    @keyframes pulseTerminalWait {
+      0%, 100% {
+        border-color: #f59e0b;
+        box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+      }
+      50% {
+        border-color: #fbbf24;
+        box-shadow: 0 0 22px rgba(245, 158, 11, 0.45);
+      }
     }
 
     /* CONDITION EVALUATION BANNER */
@@ -1696,52 +1658,21 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         mainWrapper.appendChild(grid);
       }
 
-      // 3. User Input (cin) Prompt Card
+      // 3. User Input (cin) Notification Badge (points to native VS Code terminal)
       if (step.inputRequest && step.inputRequest.isWaiting) {
-        const cinCard = document.createElement('div');
-        cinCard.className = 'cin-input-card';
-        cinCard.innerHTML = \`
-          <div class="cin-prompt-header">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="4 17 10 11 4 5"></polyline>
-              <line x1="12" y1="19" x2="20" y2="19"></line>
-            </svg>
-            <span>Waiting for input: <strong>cin &gt;&gt; \${step.inputRequest.variableName}</strong></span>
-          </div>
-          <div class="cin-input-row">
-            <input type="text" id="cinInputField" class="cin-input-field" placeholder="Enter value for \${step.inputRequest.variableName}..." />
-            <button id="cinSubmitBtn" class="cin-submit-btn">Submit ↵</button>
-          </div>
+        const terminalBadge = document.createElement('div');
+        terminalBadge.className = 'terminal-waiting-badge';
+        terminalBadge.innerHTML = \`
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <span>Waiting for terminal input for <strong>cin &gt;&gt; \${step.inputRequest.variableName}</strong> in VS Code Integrated Terminal</span>
         \`;
-        mainWrapper.appendChild(cinCard);
+        mainWrapper.appendChild(terminalBadge);
       }
 
       nodesContainer.appendChild(mainWrapper);
-
-      // Event listener for cin input
-      if (step.inputRequest && step.inputRequest.isWaiting) {
-        const field = document.getElementById('cinInputField');
-        const submitBtn = document.getElementById('cinSubmitBtn');
-        if (field && submitBtn) {
-          setTimeout(() => field.focus(), 60);
-          const doSubmit = () => {
-            const val = field.value.trim();
-            if (!val) return;
-            vscode.postMessage({
-              type: 'submitInput',
-              variableName: step.inputRequest.variableName,
-              value: val,
-              stepIndex: currentStepIndex
-            });
-          };
-          submitBtn.addEventListener('click', doSubmit);
-          field.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-              doSubmit();
-            }
-          });
-        }
-      }
     }
 
     function renderEmptyCanvas(msg) {

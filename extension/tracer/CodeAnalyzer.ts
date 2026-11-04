@@ -21,7 +21,8 @@ export class CodeAnalyzer {
     filePath: string,
     fileName: string,
     langId: string,
-    providedInputs: Record<string, string> = {}
+    providedInputs: Record<string, string> = {},
+    orderedInputs: string[] = []
   ): CodeAnalysisResult {
     let code = '';
     try {
@@ -46,7 +47,7 @@ export class CodeAnalyzer {
     }
 
     if (ProgramSimulator.canSimulate(code)) {
-      return ProgramSimulator.simulate(code, lines, fileName, providedInputs);
+      return ProgramSimulator.simulate(code, lines, fileName, providedInputs, orderedInputs);
     }
 
     if (this.isArray(code)) {

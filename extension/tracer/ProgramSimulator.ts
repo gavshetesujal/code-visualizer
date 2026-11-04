@@ -39,12 +39,16 @@ export class ProgramSimulator {
     code: string,
     lines: string[],
     fileName: string,
-    providedInputs: Record<string, string> = {}
+    providedInputs: Record<string, string> = {},
+    orderedInputs: string[] = []
   ): SimulationResult {
     const steps: ExecutionStep[] = [];
     const varOrder: string[] = [];
     const varMap = new Map<string, VariableBucket>();
     const arrayMap = new Map<string, ArrayMemoryStructure>();
+
+    let cinCallIndex = 0;
+    let isWaitingForInput = false;
 
     // Cleaned lines with original 1-based line numbers
     const cleanLines: { lineNum: number; raw: string; trimmed: string }[] = [];
@@ -148,6 +152,9 @@ export class ProgramSimulator {
     ) => {
       let idx = 0;
       while (idx < stmts.length) {
+        if (isWaitingForInput) {
+          return;
+        }
         const cur = stmts[idx];
         const trimmed = cur.trimmed;
 
@@ -270,6 +277,9 @@ export class ProgramSimulator {
             // Step 3: Body execution
             loopState.phase = 'body';
             executeStatements(bodyLines, `${scopeName}_loop`);
+            if (isWaitingForInput) {
+              break;
+            }
 
             // Step 4: Update / Increment
             previousValues.push(String(loopVarVal));
@@ -366,6 +376,9 @@ export class ProgramSimulator {
             previousValues.push(String(curValNum));
             loopState.phase = 'body';
             executeStatements(bodyLines, `${scopeName}_while`);
+            if (isWaitingForInput) {
+              break;
+            }
 
             iteration++;
           }
@@ -424,6 +437,9 @@ export class ProgramSimulator {
             loopState.iteration = iteration;
             recordStep(cur.lineNum, `do { ... } [Iteration ${iteration}]`, `Executing do-while loop body (Iteration ${iteration}).`);
             executeStatements(bodyLines, `${scopeName}_dowhile`);
+            if (isWaitingForInput) {
+              break;
+            }
 
             // Check condition after body execution
             const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
@@ -538,6 +554,10 @@ export class ProgramSimulator {
               executeStatements(elseBody, `${scopeName}_else`);
             }
 
+            if (isWaitingForInput) {
+              return;
+            }
+
             continue;
           }
         }
@@ -564,9 +584,16 @@ export class ProgramSimulator {
             }
 
             const b = varMap.get(inputVar)!;
-            const submittedVal = providedInputs[inputVar];
+            let submittedVal: string | undefined = undefined;
+
+            if (cinCallIndex < orderedInputs.length) {
+              submittedVal = orderedInputs[cinCallIndex];
+            } else if (providedInputs[inputVar] !== undefined && providedInputs[inputVar] !== '') {
+              submittedVal = providedInputs[inputVar];
+            }
 
             if (submittedVal !== undefined && submittedVal !== '') {
+              cinCallIndex++;
               // Apply user's submitted input!
               b.previousValue = b.value || '';
               b.value = submittedVal;
@@ -576,15 +603,15 @@ export class ProgramSimulator {
               recordStep(
                 cur.lineNum,
                 `cin >> ${inputVar}; [received: ${submittedVal}]`,
-                `Received user input for '${inputVar}': value ${submittedVal} entered the bucket.`,
+                `Received terminal input for '${inputVar}': value ${submittedVal} entered the bucket.`,
                 { modifiedVar: inputVar }
               );
             } else {
-              // Pause and request input
+              // Pause and request input via integrated terminal
               recordStep(
                 cur.lineNum,
                 `cin >> ${inputVar};`,
-                `Program paused: waiting for user input for variable '${inputVar}'.`,
+                `Program paused: waiting for user input for variable '${inputVar}' in VS Code integrated terminal.`,
                 {
                   inputReq: {
                     variableName: inputVar,
@@ -595,7 +622,13 @@ export class ProgramSimulator {
                   }
                 }
               );
+              isWaitingForInput = true;
+              break;
             }
+          }
+
+          if (isWaitingForInput) {
+            return;
           }
 
           idx++;
@@ -651,6 +684,9 @@ export class ProgramSimulator {
 
             // Execute function body lines
             executeStatements(targetFunc.bodyLines, funcName);
+            if (isWaitingForInput) {
+              return;
+            }
 
             // Determine return value
             let retVal = '0';
