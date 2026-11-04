@@ -346,3 +346,4 @@ if __name__ == '__main__':
     tracer = ExecutionTracer(target_file, inputs)
     result = tracer.run()
     print(json.dumps(result))
+
