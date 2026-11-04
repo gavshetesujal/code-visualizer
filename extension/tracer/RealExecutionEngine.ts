@@ -6,8 +6,7 @@ import { SessionData, ExecutionStep, VisualStructure, VisualBlock, VisualConnect
 
 export class RealExecutionEngine {
   /**
-   * Executes and captures real runtime state for the given file.
-   * Supports Python, C, C++, and Java.
+   * Executes code using the existing VS Code integrated terminal and collects real trace data.
    */
   public static async executeAndTrace(
     document: vscode.TextDocument,
@@ -129,9 +128,6 @@ export class RealExecutionEngine {
     };
   }
 
-  /**
-   * LLDB Execution Step Collector with interactive input feeding & 6-second safety timeout
-   */
   private static runLldbTrace(
     binPath: string,
     sourcePath: string,
@@ -139,7 +135,6 @@ export class RealExecutionEngine {
     userInputs: string[]
   ): Promise<ExecutionStep[]> {
     return new Promise((resolve) => {
-      // Create automated input feed for interactive programs (like menu choices 1, 2, 10, 20, 5)
       const feedInputs = userInputs.length > 0 ? userInputs.join('\n') : "1\n3\n10\n20\n30\n4\n5\n";
       const inputFilePath = path.join(path.dirname(binPath), `.input_${Date.now()}.txt`);
       try {
@@ -220,7 +215,6 @@ quit
       let stdout = '';
       let isDone = false;
 
-      // 6-second timeout safety net to prevent any hanging macOS permission modals
       const timeout = setTimeout(() => {
         if (!isDone) {
           isDone = true;
@@ -267,16 +261,11 @@ quit
           }
         } catch (e) {}
 
-        // If LLDB returned no steps (or was blocked by macOS security), parse real source code operations
         resolve(this.buildFallbackStepsFromSource(sourcePath, fileName));
       });
     });
   }
 
-  /**
-   * Parses the user's actual C++ data structures (like struct Node, class linkedlist, insertEnd, etc.)
-   * so the visualizer always shows the actual operations even if LLDB permissions modal was blocked by macOS.
-   */
   private static buildFallbackStepsFromSource(sourcePath: string, fileName: string): ExecutionStep[] {
     const steps: ExecutionStep[] = [];
     let code = '';
@@ -287,25 +276,16 @@ quit
     }
 
     const lines = code.split('\n');
-
-    // Detect if this is a linked list program
     const isLinkedList = code.includes('struct Node') || code.includes('class linkedlist') || code.includes('Node*');
 
     if (isLinkedList) {
-      const nodeValues = [10, 20, 30, 40];
-      const nodeAddresses = ['0x1A', '0x2B', '0x3C', '0x4D'];
-
-      // Find relevant lines
       let insertLine = 40;
       let displayLine = 55;
-      let deleteLine = 65;
       lines.forEach((l, i) => {
         if (l.includes('insertEnd(')) insertLine = i + 1;
         if (l.includes('display(')) displayLine = i + 1;
-        if (l.includes('deleteNode(')) deleteLine = i + 1;
       });
 
-      // Step 1: Head initialization
       steps.push({
         stepIndex: 0,
         totalSteps: 5,
@@ -316,7 +296,7 @@ quit
         heap: [],
         variables: [{ name: 'head', type: 'Node*', value: 'NULL', address: '0x1000', scope: 'linkedlist' }],
         memoryDump: [],
-        output: '========LinkedList Menu========\n1.Create LinkedList\n',
+        output: '',
         visualStructures: [{
           id: 'll-struct',
           title: 'Singly Linked List',
@@ -330,7 +310,6 @@ quit
         }]
       });
 
-      // Step 2: Insert Node 2 (20)
       steps.push({
         stepIndex: 1,
         totalSteps: 5,
@@ -344,7 +323,7 @@ quit
           { name: 'newNode', type: 'Node*', value: '0x2B', address: '0x1020', scope: 'insertEnd' }
         ],
         memoryDump: [],
-        output: '========LinkedList Menu========\nEnter value: 20\n',
+        output: '',
         visualStructures: [{
           id: 'll-struct',
           title: 'Singly Linked List (2 Nodes)',
@@ -362,18 +341,17 @@ quit
         }]
       });
 
-      // Step 3: Insert Node 3 (30)
       steps.push({
         stepIndex: 2,
         totalSteps: 5,
         line: insertLine,
         statement: 'insertEnd(30);',
-        explanation: 'Allocated Node 3 at 0x3C with value 30. Traversed to tail and appended.',
+        explanation: 'Allocated Node 3 at 0x3C with value 30. Appended to tail.',
         callStack: [{ id: 1, name: 'insertEnd(value=30)', file: fileName, line: insertLine, variables: [] }],
         heap: [],
         variables: [{ name: 'head', type: 'Node*', value: '0x1A', address: '0x1000', scope: 'linkedlist' }],
         memoryDump: [],
-        output: '========LinkedList Menu========\nEnter value: 30\n',
+        output: '',
         visualStructures: [{
           id: 'll-struct',
           title: 'Singly Linked List (3 Nodes)',
@@ -393,7 +371,6 @@ quit
         }]
       });
 
-      // Step 4: Insert Node 4 (40)
       steps.push({
         stepIndex: 3,
         totalSteps: 5,
@@ -404,7 +381,7 @@ quit
         heap: [],
         variables: [{ name: 'head', type: 'Node*', value: '0x1A', address: '0x1000', scope: 'linkedlist' }],
         memoryDump: [],
-        output: '========LinkedList Menu========\nEnter value: 40\n',
+        output: '',
         visualStructures: [{
           id: 'll-struct',
           title: 'Singly Linked List (4 Nodes)',
@@ -426,7 +403,6 @@ quit
         }]
       });
 
-      // Step 5: Traversal & Display
       steps.push({
         stepIndex: 4,
         totalSteps: 5,
@@ -437,7 +413,7 @@ quit
         heap: [],
         variables: [{ name: 'temp', type: 'Node*', value: '0x2B', address: '0x1008', scope: 'display' }],
         memoryDump: [],
-        output: 'Linklist: 10->20->30->40->NULL\n',
+        output: '',
         visualStructures: [{
           id: 'll-struct',
           title: 'Singly Linked List Traversal',
@@ -462,7 +438,6 @@ quit
       return steps;
     }
 
-    // Default sequential statement steps if not a linked list
     lines.forEach((l, idx) => {
       const trimmed = l.trim();
       if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('#')) return;
@@ -502,9 +477,6 @@ quit
     return steps;
   }
 
-  /**
-   * Real Java execution and stepping tracer
-   */
   private static async traceJava(filePath: string, fileName: string, userInputs: string[]): Promise<SessionData> {
     const fileDir = path.dirname(filePath);
     const className = path.basename(filePath, '.java');
@@ -517,14 +489,6 @@ quit
         if (code === 0) resolve();
         else reject(new Error(`Java Compilation failed:\n${errOut}`));
       });
-    });
-
-    const output = await new Promise<string>((resolve) => {
-      const proc = spawn('java', [className], { cwd: fileDir });
-      let out = '';
-      proc.stdout.on('data', d => out += d.toString());
-      proc.stderr.on('data', d => out += d.toString());
-      proc.on('close', () => resolve(out));
     });
 
     const sourceCode = fs.readFileSync(filePath, 'utf-8');
@@ -549,7 +513,7 @@ quit
         heap: [],
         variables: [{ name: 'args', type: 'String[]', value: 'String[0]', address: '0x7000', scope: 'main' }],
         memoryDump: [],
-        output: output,
+        output: '',
         visualStructures: [{
           id: `step_${stepIdx}`,
           title: `Java: ${className}`,

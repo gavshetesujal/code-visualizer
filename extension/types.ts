@@ -42,20 +42,20 @@ export interface VisualBlock {
   subLabel?: string; // e.g. "Node 1", "head", "arr[0]", "root"
   type?: string; // "int", "Node*", "list", "dict", "str"
   isActive?: boolean; // glowing cyan highlight
-  highlightColor?: string; // custom highlight if needed
-  x?: number; // spatial coordinate on n8n canvas
+  highlightColor?: string;
+  x?: number;
   y?: number;
-  z?: number; // 3D depth layer
+  z?: number;
   status?: 'active' | 'created' | 'modified' | 'traversed' | 'idle';
   details?: Record<string, string | number>;
 }
 
 export interface VisualConnection {
   fromId: string;
-  toId?: string; // target block id, or undefined if pointing to terminal text
-  label?: string; // e.g. "next", "left", "right", "calls", "points_to"
-  targetLabel?: string; // e.g. "NULL", "None"
-  color?: string; // cyan, orange, blue, green
+  toId?: string;
+  label?: string;
+  targetLabel?: string;
+  color?: string;
   dashed?: boolean;
   animated?: boolean;
 }
@@ -63,13 +63,13 @@ export interface VisualConnection {
 export interface VisualPointerMarker {
   targetBlockId: string;
   label: string; // e.g. "HEAD", "curr", "ptr", "top", "front", "rear", "pivot"
-  color?: string; // e.g. "#f59e0b" (yellow/orange), "#38bdf8" (cyan)
+  color?: string;
   direction?: 'down' | 'up' | 'left' | 'right';
 }
 
 export interface VisualCallout {
   targetBlockId: string;
-  text: string; // e.g. "Traversing the list...", "Comparing pivot...", "Pushing 30..."
+  text: string;
 }
 
 export type StructureKind = 
@@ -79,7 +79,7 @@ export type StructureKind =
   | 'queue' 
   | 'tree' 
   | 'graph' 
-  | 'workflow'
+  | 'workflow' 
   | 'pointers' 
   | 'objects' 
   | 'variables';
@@ -106,8 +106,6 @@ export interface ExecutionStep {
   memoryDump: MemoryEntry[];
   output: string;
   visualStructures?: VisualStructure[];
-  isWaitingInput?: boolean;
-  inputPrompt?: string;
 }
 
 export interface SessionData {
@@ -126,11 +124,9 @@ export type WebviewToExtensionMessage =
   | { type: 'pause' }
   | { type: 'restart' }
   | { type: 'speedChange'; speed: number }
-  | { type: 'selectNode'; nodeId: string; line?: number }
-  | { type: 'terminalInput'; input: string };
+  | { type: 'selectNode'; nodeId: string; line?: number };
 
 export type ExtensionToWebviewMessage =
   | { type: 'init'; session: SessionData }
   | { type: 'setStep'; stepIndex: number }
-  | { type: 'terminalOutput'; text: string }
-  | { type: 'terminalWaitInput'; prompt: string };
+  | { type: 'appendStep'; step: ExecutionStep };

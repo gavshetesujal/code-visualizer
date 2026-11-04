@@ -50,12 +50,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       user-select: none;
     }
 
-    /* TOP WORKFLOW HEADER */
+    /* TOP WORKFLOW HEADER (n8n inspired) */
     .workflow-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 18px;
+      padding: 10px 20px;
       background-color: #0b1120;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       flex-shrink: 0;
@@ -66,7 +66,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     .brand-section {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       font-size: 14px;
       font-weight: 700;
     }
@@ -82,7 +82,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #38bdf8;
       border: 1px solid rgba(56, 189, 248, 0.25);
       font-size: 11px;
-      padding: 2px 8px;
+      padding: 3px 8px;
       border-radius: 12px;
       font-weight: 600;
     }
@@ -99,8 +99,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #ffffff;
       border: none;
       border-radius: 20px;
-      padding: 5px 16px;
-      font-size: 12px;
+      padding: 6px 18px;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
@@ -125,13 +125,13 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: var(--text-main);
       border-radius: 20px;
-      padding: 4px 12px;
+      padding: 5px 14px;
       font-size: 12px;
       font-weight: 500;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       transition: all 0.15s ease;
     }
 
@@ -145,8 +145,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: var(--text-main);
       border-radius: 20px;
-      padding: 3px 6px;
-      font-size: 11px;
+      padding: 4px 8px;
+      font-size: 12px;
       cursor: pointer;
       outline: none;
     }
@@ -168,7 +168,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: var(--text-muted);
       border-radius: 6px;
-      padding: 4px 8px;
+      padding: 4px 10px;
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
@@ -179,37 +179,10 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #00f0ff;
       border-color: #00f0ff;
       background: rgba(0, 240, 255, 0.08);
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
     }
 
-    .tool-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 12px;
-      padding: 4px 6px;
-      border-radius: 4px;
-      transition: all 0.15s ease;
-    }
-
-    .tool-btn:hover, .tool-btn.active {
-      color: #ffffff;
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    /* MAIN SPLIT: CANVAS ON TOP, TERMINAL ON BOTTOM */
-    .workspace-split {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* THE CANVAS */
+    /* MAIN INTERACTIVE WORKFLOW CANVAS */
     .canvas-container {
       flex: 1;
       position: relative;
@@ -219,7 +192,6 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       background-image: 
         radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
       background-size: 24px 24px;
-      min-height: 180px;
     }
 
     .canvas-container:active {
@@ -251,7 +223,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       align-items: center;
       justify-content: center;
       min-width: 800px;
-      min-height: 400px;
+      min-height: 500px;
       transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
@@ -264,7 +236,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       align-items: center;
       gap: 36px;
       position: relative;
-      padding: 50px 30px;
+      padding: 60px 40px;
       z-index: 2;
     }
 
@@ -275,10 +247,10 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* WORKFLOW BLOCK NODE */
+    /* MODERN N8N WORKFLOW BLOCK */
     .workflow-block {
-      width: 128px;
-      height: 104px;
+      width: 130px;
+      height: 108px;
       background: #0d1627;
       border: 1.5px solid #1e293b;
       border-radius: 14px;
@@ -318,6 +290,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       font-family: var(--font-mono);
       font-size: 11px;
       color: #94a3b8;
+      font-weight: 500;
     }
 
     .block-tag {
@@ -344,7 +317,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       font-weight: 500;
     }
 
-    /* POINTER OVERLAY */
+    /* POINTER OVERLAY (HEAD) */
     .pointer-overlay {
       position: absolute;
       top: -65px;
@@ -374,7 +347,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border-top: 10px solid #f59e0b;
     }
 
-    /* CALLOUT SPEECH BUBBLE */
+    /* SPEECH BUBBLE CALLOUT */
     .callout-bubble {
       position: absolute;
       top: -55px;
@@ -384,8 +357,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #04101e;
       font-weight: 700;
       font-size: 12px;
-      padding: 5px 12px;
-      border-radius: 12px;
+      padding: 6px 14px;
+      border-radius: 14px;
       white-space: nowrap;
       box-shadow: 0 4px 20px rgba(0, 210, 255, 0.5);
       z-index: 6;
@@ -469,9 +442,9 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       background: rgba(11, 17, 32, 0.85);
       border: 1px solid rgba(56, 189, 248, 0.3);
       backdrop-filter: blur(10px);
-      padding: 6px 12px;
+      padding: 8px 14px;
       border-radius: 8px;
-      font-size: 11px;
+      font-size: 12px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -479,33 +452,33 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     }
 
     .live-pulse-dot {
-      width: 7px;
-      height: 7px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       background: #00f0ff;
-      box-shadow: 0 0 8px #00f0ff;
+      box-shadow: 0 0 10px #00f0ff;
     }
 
     /* FLOATING CANVAS HUD */
     .canvas-hud {
       position: absolute;
-      right: 18px;
-      bottom: 18px;
+      right: 20px;
+      bottom: 20px;
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 6px;
       background: rgba(13, 21, 39, 0.85);
       border: 1px solid rgba(255, 255, 255, 0.08);
       backdrop-filter: blur(8px);
-      padding: 5px;
+      padding: 6px;
       border-radius: 8px;
       z-index: 10;
     }
 
     .hud-btn {
-      width: 28px;
-      height: 28px;
-      border-radius: 5px;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
       background: transparent;
       border: none;
       color: #94a3b8;
@@ -513,7 +486,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 15px;
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .hud-btn:hover {
@@ -521,141 +495,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #ffffff;
     }
 
-    /* RESIZABLE SPLIT BAR */
-    .terminal-resizer {
-      height: 4px;
-      background: rgba(255, 255, 255, 0.05);
-      cursor: row-resize;
-      transition: background 0.15s ease;
-      z-index: 15;
-    }
-
-    .terminal-resizer:hover, .terminal-resizer.dragging {
-      background: #38bdf8;
-    }
-
-    /* INTEGRATED TERMINAL PANEL (VS Code styled) */
-    .integrated-terminal {
-      height: 220px;
-      min-height: 90px;
-      max-height: 70vh;
-      background: #090d16;
-      border-top: 1px solid #1e293b;
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      z-index: 15;
-      font-family: var(--font-mono);
-      transition: height 0.05s ease-out;
-    }
-
-    .terminal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 14px;
-      background: #0d1527;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      font-size: 11px;
-      font-weight: 600;
-      color: #94a3b8;
-    }
-
-    .terminal-tabs {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .terminal-tab {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #38bdf8;
-      text-transform: uppercase;
-      font-size: 10px;
-      letter-spacing: 0.5px;
-    }
-
-    .terminal-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .term-btn {
-      background: transparent;
-      border: none;
-      color: #64748b;
-      cursor: pointer;
-      font-size: 11px;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    .term-btn:hover {
-      color: #ffffff;
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    /* Terminal Output Log Area */
-    .terminal-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 10px 14px;
-      font-size: 12px;
-      color: #e2e8f0;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    /* Interactive Terminal Input Line (cin / input prompt) */
-    .terminal-input-row {
-      display: flex;
-      align-items: center;
-      padding: 6px 14px;
-      background: rgba(0, 0, 0, 0.3);
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      gap: 8px;
-    }
-
-    .terminal-prompt-prefix {
-      color: #00f0ff;
-      font-weight: 700;
-      font-size: 13px;
-    }
-
-    .terminal-input-field {
-      flex: 1;
-      background: transparent;
-      border: none;
-      color: #ffffff;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      outline: none;
-    }
-
-    .terminal-input-field::placeholder {
-      color: #475569;
-    }
-
-    .terminal-enter-badge {
-      font-size: 10px;
-      background: rgba(56, 189, 248, 0.15);
-      color: #38bdf8;
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 600;
-    }
-
     /* BOTTOM CONTROLS */
     .bottom-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 20px;
+      padding: 12px 24px;
       background-color: #0b1120;
       border-top: 1px solid rgba(255, 255, 255, 0.05);
       flex-shrink: 0;
@@ -666,7 +511,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     .nav-btn-group {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
 
     .nav-btn {
@@ -674,13 +519,13 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border: 1px solid rgba(255, 255, 255, 0.1);
       color: var(--text-main);
       border-radius: 6px;
-      padding: 6px 14px;
+      padding: 7px 16px;
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       transition: all 0.15s ease;
     }
 
@@ -768,13 +613,13 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
   <header class="workflow-header">
     <div class="brand-section">
       <span class="brand-icon">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="16 18 22 12 16 6"></polyline>
           <polyline points="8 6 2 12 8 18"></polyline>
         </svg>
       </span>
       <span>Code<span style="color:#38bdf8;">Visualizer</span></span>
-      <span class="structure-type-pill" id="structureTypePill">Linked List</span>
+      <span class="structure-type-pill" id="structureTypePill">Canvas</span>
     </div>
 
     <!-- Playback Controls -->
@@ -787,7 +632,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       </button>
 
       <button class="pill-btn" id="restartBtn" title="Restart execution session">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="1 4 1 10 7 10"></polyline>
           <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
         </svg>
@@ -801,91 +646,43 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       </select>
     </div>
 
-    <!-- Top Right Perspective & Terminal Toggle -->
+    <!-- Top Tools: 2D / 3D Switcher -->
     <div class="top-tools">
       <button class="mode-switch-btn active" id="btn2D" title="Flat 2D workflow view">2D</button>
       <button class="mode-switch-btn" id="btn3D" title="Spatial 3D depth view">3D</button>
-      <button class="tool-btn active" id="toggleTerminalBtn" title="Toggle Integrated Terminal">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="4 17 10 11 4 5"></polyline>
-          <line x1="12" y1="19" x2="20" y2="19"></line>
-        </svg>
-        <span>Terminal</span>
-      </button>
     </div>
   </header>
 
-  <!-- Split View: Canvas on Top, Integrated Terminal on Bottom -->
-  <div class="workspace-split">
-    <!-- Interactive Canvas -->
-    <div class="canvas-container" id="canvasContainer">
-      <!-- Live Code Indicator (connected to active editor line) -->
-      <div class="live-code-indicator" id="liveIndicator">
-        <div class="live-pulse-dot"></div>
-        <div>
-          <span style="color:#38bdf8; font-weight:600;" id="liveStmt">Connecting...</span>
-          <span style="color:#94a3b8; margin-left:6px;" id="liveLine">Line 1</span>
-        </div>
-      </div>
-
-      <!-- Canvas Viewport -->
-      <div class="canvas-viewport" id="canvasViewport">
-        <div class="visual-world" id="visualWorld">
-          <div id="nodesContainer"></div>
-        </div>
-      </div>
-
-      <!-- Canvas HUD -->
-      <div class="canvas-hud">
-        <button class="hud-btn" id="zoomInBtn" title="Zoom In">+</button>
-        <button class="hud-btn" id="zoomOutBtn" title="Zoom Out">−</button>
-        <button class="hud-btn" id="centerBtn" title="Recenter View">⊙</button>
+  <!-- Interactive n8n Canvas -->
+  <main class="canvas-container" id="canvasContainer">
+    <!-- Live Code Synchronization Indicator (connected to active editor line) -->
+    <div class="live-code-indicator" id="liveIndicator">
+      <div class="live-pulse-dot"></div>
+      <div>
+        <span style="color:#38bdf8; font-weight:600;" id="liveStmt">Connecting...</span>
+        <span style="color:#94a3b8; margin-left:6px;" id="liveLine">Line 1</span>
       </div>
     </div>
 
-    <!-- Resizer Divider -->
-    <div class="terminal-resizer" id="terminalResizer"></div>
-
-    <!-- Integrated VS Code Style Interactive Terminal -->
-    <section class="integrated-terminal" id="integratedTerminal">
-      <div class="terminal-header">
-        <div class="terminal-tabs">
-          <div class="terminal-tab">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="4 17 10 11 4 5"></polyline>
-              <line x1="12" y1="19" x2="20" y2="19"></line>
-            </svg>
-            <span>TERMINAL (stdin / stdout)</span>
-          </div>
-        </div>
-        <div class="terminal-actions">
-          <button class="term-btn" id="clearTerminalBtn" title="Clear Terminal">Clear</button>
-        </div>
+    <!-- Zoomable & Pannable Viewport -->
+    <div class="canvas-viewport" id="canvasViewport">
+      <div class="visual-world" id="visualWorld">
+        <div id="nodesContainer"></div>
       </div>
+    </div>
 
-      <!-- Live Terminal Output Area -->
-      <div class="terminal-body" id="terminalBody"></div>
-
-      <!-- Interactive Input Line (cin, input()) -->
-      <div class="terminal-input-row" id="terminalInputRow">
-        <span class="terminal-prompt-prefix">❯</span>
-        <input 
-          type="text" 
-          class="terminal-input-field" 
-          id="terminalInputField" 
-          placeholder="Type input here and press Enter (e.g. choice, node value)..." 
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <span class="terminal-enter-badge">↵ Enter</span>
-      </div>
-    </section>
-  </div>
+    <!-- Floating Canvas HUD (Zoom in, Zoom out, Center) -->
+    <div class="canvas-hud">
+      <button class="hud-btn" id="zoomInBtn" title="Zoom In">+</button>
+      <button class="hud-btn" id="zoomOutBtn" title="Zoom Out">−</button>
+      <button class="hud-btn" id="centerBtn" title="Recenter View">⊙</button>
+    </div>
+  </main>
 
   <!-- Bottom Timeline & Navigation Bar -->
   <footer class="bottom-bar">
     <div class="nav-btn-group">
-      <button class="nav-btn" id="backwardBtn" title="Previous execution step">
+      <button class="nav-btn" id="backwardBtn" title="Previous step">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
           <polygon points="19 20 9 12 19 4 19 20"></polygon>
           <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2"></line>
@@ -893,7 +690,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         <span>Backward</span>
       </button>
 
-      <button class="nav-btn" id="forwardBtn" title="Next execution step">
+      <button class="nav-btn" id="forwardBtn" title="Next step">
         <span>Forward</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
           <polygon points="5 4 15 12 5 20 5 4"></polygon>
@@ -902,7 +699,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       </button>
     </div>
 
-    <!-- Timeline Scrubber -->
+    <!-- Timeline Scrubber with Dots -->
     <div class="timeline-container">
       <div class="timeline-bar" id="timelineBar">
         <div class="timeline-fill" id="timelineFill"></div>
@@ -910,7 +707,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       </div>
     </div>
 
-    <!-- Step Counter -->
+    <!-- Step Counter (e.g. Step 2 of 5) -->
     <div class="step-counter-text" id="stepCounterText">Step 1 of 1</div>
   </footer>
 
@@ -927,9 +724,6 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
-
-    // Terminal History & Inputs Log
-    const inputHistory = [];
 
     // DOM Elements
     const canvasContainer = document.getElementById('canvasContainer');
@@ -953,74 +747,6 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
     const centerBtn = document.getElementById('centerBtn');
-    const integratedTerminal = document.getElementById('integratedTerminal');
-    const toggleTerminalBtn = document.getElementById('toggleTerminalBtn');
-    const terminalBody = document.getElementById('terminalBody');
-    const terminalInputField = document.getElementById('terminalInputField');
-    const clearTerminalBtn = document.getElementById('clearTerminalBtn');
-    const terminalResizer = document.getElementById('terminalResizer');
-
-    // Terminal Resizing
-    let isResizingTerminal = false;
-    terminalResizer.addEventListener('mousedown', (e) => {
-      isResizingTerminal = true;
-      terminalResizer.classList.add('dragging');
-      document.body.style.cursor = 'row-resize';
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isResizingTerminal) return;
-      const newHeight = window.innerHeight - e.clientY - 45; // subtract footer height
-      if (newHeight >= 60 && newHeight <= window.innerHeight * 0.75) {
-        integratedTerminal.style.height = newHeight + 'px';
-      }
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isResizingTerminal) {
-        isResizingTerminal = false;
-        terminalResizer.classList.remove('dragging');
-        document.body.style.cursor = '';
-      }
-    });
-
-    toggleTerminalBtn.addEventListener('click', () => {
-      const isHidden = integratedTerminal.style.display === 'none';
-      integratedTerminal.style.display = isHidden ? 'flex' : 'none';
-      terminalResizer.style.display = isHidden ? 'block' : 'none';
-      toggleTerminalBtn.classList.toggle('active', isHidden);
-    });
-
-    clearTerminalBtn.addEventListener('click', () => {
-      terminalBody.innerHTML = '';
-    });
-
-    // Terminal Input Submission (stdin)
-    terminalInputField.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const val = terminalInputField.value;
-        if (val.trim() === '') return;
-
-        // Print entered input into terminal body
-        appendTerminalText(val + '\\n', '#00f0ff');
-        inputHistory.push(val);
-        terminalInputField.value = '';
-
-        // Send stdin input to backend running process
-        vscode.postMessage({
-          type: 'terminalInput',
-          input: val
-        });
-      }
-    });
-
-    function appendTerminalText(text, color) {
-      const span = document.createElement('span');
-      if (color) span.style.color = color;
-      span.textContent = text;
-      terminalBody.appendChild(span);
-      terminalBody.scrollTop = terminalBody.scrollHeight;
-    }
 
     // Pan & Zoom
     function updateTransform() {
@@ -1099,8 +825,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       timelineFill.style.width = pct + '%';
     }
 
-    // Canvas & Terminal State Renderer
-    function renderState() {
+    // Adaptive Canvas Renderer
+    function renderCanvas() {
       const step = session.steps[currentStepIndex];
       if (!step) return;
 
@@ -1120,18 +846,6 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       if (struct) {
         structureTypePill.textContent = struct.title || struct.kind;
         renderRowStructure(struct);
-      }
-
-      // Update Integrated Terminal Output
-      terminalBody.innerHTML = '';
-      if (step.output) {
-        appendTerminalText(step.output);
-      }
-
-      // If program is actively requesting input (e.g. cin >> choice)
-      if (step.isWaitingInput) {
-        terminalInputField.placeholder = step.inputPrompt || "Program is waiting for input: enter value and press Enter...";
-        terminalInputField.focus();
       }
     }
 
@@ -1213,7 +927,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     function setStep(newIndex) {
       if (newIndex < 0 || newIndex >= session.steps.length) return;
       currentStepIndex = newIndex;
-      renderState();
+      renderCanvas();
       vscode.postMessage({ type: 'stepChange', stepIndex: currentStepIndex });
     }
 
@@ -1243,7 +957,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       } else {
         if (currentStepIndex >= session.steps.length - 1) {
           currentStepIndex = 0;
-          renderState();
+          renderCanvas();
         }
         startPlayback();
         vscode.postMessage({ type: 'play' });
@@ -1278,7 +992,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       switch (msg.type) {
         case 'setStep':
           currentStepIndex = msg.stepIndex;
-          renderState();
+          renderCanvas();
           if (currentStepIndex >= session.steps.length - 1 && isPlaying) {
             pausePlayback();
           }
@@ -1286,19 +1000,18 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         case 'init':
           session = msg.session;
           currentStepIndex = session.currentStepIndex || 0;
-          renderState();
+          renderCanvas();
           break;
-        case 'terminalOutput':
-          appendTerminalText(msg.text);
-          break;
-        case 'terminalWaitInput':
-          terminalInputField.placeholder = msg.prompt || "Enter input...";
-          terminalInputField.focus();
+        case 'appendStep':
+          session.steps.push(msg.step);
+          session.steps.forEach(s => s.totalSteps = session.steps.length);
+          currentStepIndex = session.steps.length - 1;
+          renderCanvas();
           break;
       }
     });
 
-    renderState();
+    renderCanvas();
     vscode.postMessage({ type: 'ready' });
   </script>
 </body>

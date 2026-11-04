@@ -15,7 +15,7 @@ export class VisualizationSession {
   private history: ExecutionHistory;
   private sessionData: SessionData;
   private lineDecoration: vscode.TextEditorDecorationType;
-  private userInputsLog: string[] = [];
+  private executionTerminal?: vscode.Terminal;
 
   private constructor(
     context: vscode.ExtensionContext,
@@ -60,6 +60,7 @@ export class VisualizationSession {
 
     this.setupListeners();
     this.syncEditorDecoration();
+    this.runInIntegratedTerminal(editor.document);
   }
 
   public static async createOrReveal(
@@ -98,6 +99,44 @@ export class VisualizationSession {
     return this.activeSessions.get(documentUri.toString());
   }
 
+  /**
+   * Runs the actual program inside VS Code's integrated terminal at the bottom.
+   * All cin, cout, input() and user typing happens naturally in this existing terminal.
+   */
+  private runInIntegratedTerminal(document: vscode.TextDocument) {
+    const filePath = document.fileName;
+    const fileDir = path.dirname(filePath);
+    const fileName = path.basename(filePath);
+    const langId = document.languageId;
+
+    // Reuse or create an integrated terminal named "Code Visualizer"
+    const terminalName = 'Code Visualizer';
+    this.executionTerminal = vscode.window.terminals.find(t => t.name === terminalName);
+    if (!this.executionTerminal) {
+      this.executionTerminal = vscode.window.createTerminal({
+        name: terminalName,
+        cwd: fileDir
+      });
+    }
+
+    // Show the existing bottom terminal
+    this.executionTerminal.show(true);
+
+    // Send the appropriate execution command to the existing terminal
+    if (langId === 'python') {
+      this.executionTerminal.sendText(`python3 "${filePath}"`);
+    } else if (langId === 'cpp') {
+      const outBin = `./.vis_${path.basename(filePath, '.cpp')}`;
+      this.executionTerminal.sendText(`clang++ -std=c++17 "${filePath}" -o ${outBin} && ${outBin}`);
+    } else if (langId === 'c') {
+      const outBin = `./.vis_${path.basename(filePath, '.c')}`;
+      this.executionTerminal.sendText(`clang "${filePath}" -o ${outBin} && ${outBin}`);
+    } else if (langId === 'java') {
+      const className = path.basename(filePath, '.java');
+      this.executionTerminal.sendText(`javac "${filePath}" && java ${className}`);
+    }
+  }
+
   private setupListeners() {
     this.history.setOnStepChangedListener(step => {
       this.syncEditorDecoration();
@@ -108,7 +147,7 @@ export class VisualizationSession {
     });
 
     this.panel.webview.onDidReceiveMessage(
-      async (msg: WebviewToExtensionMessage) => {
+      (msg: WebviewToExtensionMessage) => {
         switch (msg.type) {
           case 'ready':
             this.syncEditorDecoration();
@@ -123,7 +162,6 @@ export class VisualizationSession {
             this.history.pause();
             break;
           case 'restart':
-            this.userInputsLog = [];
             this.history.restart();
             break;
           case 'speedChange':
@@ -133,10 +171,6 @@ export class VisualizationSession {
             if (msg.line) {
               this.highlightSpecificLine(msg.line);
             }
-            break;
-          case 'terminalInput':
-            // User submitted stdin in the integrated terminal
-            await this.handleTerminalInput(msg.input);
             break;
         }
       },
@@ -162,37 +196,6 @@ export class VisualizationSession {
       undefined,
       this.context.subscriptions
     );
-  }
-
-  /**
-   * Re-runs the execution tracer with the accumulated user inputs fed directly into stdin
-   */
-  private async handleTerminalInput(input: string) {
-    this.userInputsLog.push(input);
-
-    const doc = await vscode.workspace.openTextDocument(this.documentUri);
-    try {
-      const updatedSession = await RealExecutionEngine.executeAndTrace(doc, this.userInputsLog);
-      this.sessionData = updatedSession;
-      
-      this.history.dispose();
-      this.history = new ExecutionHistory(
-        this.sessionData.steps,
-        Math.max(0, this.sessionData.steps.length - 1)
-      );
-
-      this.panel.webview.postMessage({
-        type: 'init',
-        session: this.sessionData
-      });
-
-      this.syncEditorDecoration();
-    } catch (e: any) {
-      this.panel.webview.postMessage({
-        type: 'terminalOutput',
-        text: `\nExecution error: ${e.message}\n`
-      });
-    }
   }
 
   private highlightSpecificLine(lineNumber: number) {
