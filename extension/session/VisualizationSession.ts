@@ -177,6 +177,9 @@ export class VisualizationSession {
               this.highlightSpecificLine(msg.line);
             }
             break;
+          case 'submitInput':
+            this.handleUserInput(msg.variableName, msg.value, msg.stepIndex);
+            break;
         }
       },
       undefined,
@@ -227,6 +230,51 @@ export class VisualizationSession {
     if (!step) return;
 
     this.highlightSpecificLine(step.line);
+  }
+
+  private handleUserInput(varName: string, value: string, stepIndex: number) {
+    if (this.executionTerminal) {
+      this.executionTerminal.sendText(value);
+    }
+
+    const steps = this.sessionData.steps;
+    if (stepIndex >= 0 && stepIndex < steps.length) {
+      const step = steps[stepIndex];
+      if (step.inputRequest) {
+        step.inputRequest.isWaiting = false;
+        step.inputRequest.submittedValue = value;
+      }
+      if (step.buckets) {
+        const b = step.buckets.find(b => b.name === varName);
+        if (b) {
+          b.previousValue = b.value || '';
+          b.value = value;
+          b.isEmpty = false;
+          b.isModified = true;
+        }
+      }
+    }
+
+    // Propagate submitted value to subsequent steps
+    for (let i = stepIndex + 1; i < steps.length; i++) {
+      const st = steps[i];
+      if (st.buckets) {
+        const b = st.buckets.find(b => b.name === varName);
+        if (b && (b.isEmpty || !b.value)) {
+          b.value = value;
+          b.isEmpty = false;
+        }
+      }
+    }
+
+    // Update webview and advance
+    this.panel.webview.postMessage({
+      type: 'init',
+      session: this.sessionData
+    });
+
+    const nextIndex = Math.min(steps.length - 1, stepIndex + 1);
+    this.history.goTo(nextIndex);
   }
 
   public dispose() {

@@ -94,6 +94,37 @@ export interface VisualStructure {
   callout?: VisualCallout;
 }
 
+export interface VariableBucket {
+  name: string;
+  value: string;
+  previousValue?: string;
+  isModified?: boolean;
+  isNew?: boolean;
+  isEmpty?: boolean;
+}
+
+export interface LoopContainerState {
+  id: string;
+  loopType: 'for' | 'while' | 'do-while';
+  headerText: string;
+  variableName: string;
+  currentValue: string;
+  previousValues: string[];
+  iteration: number;
+  conditionText: string;
+  conditionPassed: boolean;
+  phase: 'init' | 'condition' | 'body' | 'update' | 'exit';
+  isExiting?: boolean;
+}
+
+export interface InputRequestState {
+  variableName: string;
+  promptText: string;
+  line: number;
+  submittedValue?: string;
+  isWaiting: boolean;
+}
+
 export interface ExecutionStep {
   stepIndex: number;
   totalSteps: number;
@@ -106,6 +137,9 @@ export interface ExecutionStep {
   memoryDump: MemoryEntry[];
   output: string;
   visualStructures?: VisualStructure[];
+  buckets?: VariableBucket[];
+  activeLoop?: LoopContainerState;
+  inputRequest?: InputRequestState;
 }
 
 export interface SessionData {
@@ -124,7 +158,8 @@ export type WebviewToExtensionMessage =
   | { type: 'pause' }
   | { type: 'restart' }
   | { type: 'speedChange'; speed: number }
-  | { type: 'selectNode'; nodeId: string; line?: number };
+  | { type: 'selectNode'; nodeId: string; line?: number }
+  | { type: 'submitInput'; variableName: string; value: string; stepIndex: number };
 
 export type ExtensionToWebviewMessage =
   | { type: 'init'; session: SessionData }

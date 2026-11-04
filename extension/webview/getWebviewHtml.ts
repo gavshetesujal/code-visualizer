@@ -491,6 +491,371 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       border-radius: 6px;
     }
 
+    /* VARIABLE BUCKET DESIGN */
+    .buckets-grid {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 28px;
+      padding: 24px;
+      z-index: 2;
+    }
+
+    .var-bucket {
+      width: 136px;
+      height: 136px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.75) 0%, rgba(13, 21, 39, 0.95) 100%);
+      border: 2px solid #334155;
+      border-top: none;
+      border-radius: 0 0 16px 16px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5), inset 0 -4px 12px rgba(0, 0, 0, 0.3);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .var-bucket::before {
+      content: '';
+      position: absolute;
+      top: -4px;
+      left: -4px;
+      right: -4px;
+      height: 6px;
+      background: #475569;
+      border-radius: 4px;
+    }
+
+    .var-bucket.is-modified {
+      border-color: #00f0ff;
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.35), inset 0 0 15px rgba(0, 240, 255, 0.15);
+      transform: translateY(-4px);
+    }
+
+    .var-bucket.is-modified::before {
+      background: #00f0ff;
+      box-shadow: 0 0 10px #00f0ff;
+    }
+
+    .var-bucket.is-waiting-input {
+      border-color: #f59e0b;
+      box-shadow: 0 0 30px rgba(245, 158, 11, 0.4), inset 0 0 15px rgba(245, 158, 11, 0.15);
+      animation: pulseBucket 1.8s infinite ease-in-out;
+    }
+
+    .var-bucket.is-waiting-input::before {
+      background: #f59e0b;
+      box-shadow: 0 0 12px #f59e0b;
+    }
+
+    @keyframes pulseBucket {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.04); }
+    }
+
+    .bucket-name-tag {
+      position: absolute;
+      top: -26px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #38bdf8;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 2px 12px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      letter-spacing: 0.5px;
+    }
+
+    .var-bucket.is-modified .bucket-name-tag {
+      border-color: #00f0ff;
+      color: #00f0ff;
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+    }
+
+    .var-bucket.is-waiting-input .bucket-name-tag {
+      border-color: #f59e0b;
+      color: #f59e0b;
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+    }
+
+    .bucket-value-container {
+      position: relative;
+      width: 100%;
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .bucket-current-val {
+      font-family: var(--font-family);
+      font-size: 32px;
+      font-weight: 800;
+      color: #ffffff;
+      line-height: 1;
+      text-align: center;
+    }
+
+    /* Transition Animations for Value changes */
+    .value-enter {
+      animation: dropIn 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    .value-exit {
+      position: absolute;
+      font-family: var(--font-family);
+      font-size: 28px;
+      font-weight: 800;
+      color: rgba(255, 255, 255, 0.4);
+      animation: floatOut 0.45s cubic-bezier(0.55, 0.055, 0.675, 0.19) forwards;
+    }
+
+    @keyframes dropIn {
+      0% {
+        opacity: 0;
+        transform: translateY(-40px) scale(0.6);
+      }
+      70% {
+        opacity: 1;
+        transform: translateY(4px) scale(1.08);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes floatOut {
+      0% {
+        opacity: 0.7;
+        transform: translateY(0) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(-45px) scale(0.7);
+      }
+    }
+
+    .bucket-empty-placeholder {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #64748b;
+      border: 1px dashed #334155;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+
+    /* LOOP CONTAINER */
+    .loop-container {
+      background: rgba(13, 22, 39, 0.85);
+      border: 2px solid #1e3a8a;
+      border-radius: 20px;
+      padding: 24px 30px;
+      min-width: 540px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(30, 58, 138, 0.25);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+
+    .loop-container.is-active-loop {
+      border-color: #38bdf8;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 35px rgba(56, 189, 248, 0.35);
+    }
+
+    .loop-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 12px;
+    }
+
+    .loop-title {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .loop-badge {
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid #38bdf8;
+      color: #38bdf8;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .loop-phase-pill {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #f59e0b;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .loop-cycle-track {
+      position: absolute;
+      right: -36px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 60px;
+      height: 120px;
+      pointer-events: none;
+    }
+
+    .cycle-path {
+      stroke: #38bdf8;
+      stroke-width: 2.5;
+      stroke-dasharray: 6 4;
+      animation: cycleFlow 1.5s linear infinite;
+      fill: none;
+    }
+
+    @keyframes cycleFlow {
+      from { stroke-dashoffset: 20; }
+      to { stroke-dashoffset: 0; }
+    }
+
+    /* LOOP HISTORY */
+    .loop-history-section {
+      background: rgba(11, 17, 32, 0.7);
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .history-label {
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+
+    .history-chips-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .history-chip {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 6px;
+    }
+
+    .history-arrow {
+      color: #64748b;
+      font-size: 11px;
+    }
+
+    .history-current-chip {
+      background: rgba(56, 189, 248, 0.2);
+      border: 1.5px solid #38bdf8;
+      color: #38bdf8;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 6px;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+    }
+
+    /* CIN INPUT PROMPT OVERLAY */
+    .cin-input-card {
+      background: #0f172a;
+      border: 2px solid #f59e0b;
+      border-radius: 14px;
+      padding: 16px 20px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 25px rgba(245, 158, 11, 0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 340px;
+      margin: 16px auto;
+      z-index: 10;
+    }
+
+    .cin-prompt-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #f59e0b;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .cin-input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cin-input-field {
+      flex: 1;
+      background: #080c14;
+      border: 1px solid #334155;
+      color: #ffffff;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .cin-input-field:focus {
+      border-color: #f59e0b;
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+    }
+
+    .cin-submit-btn {
+      background: #f59e0b;
+      color: #04101e;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .cin-submit-btn:hover {
+      background: #d97706;
+      transform: translateY(-1px);
+    }
+
     /* LIVE EXECUTION CODE INDICATOR */
     .live-code-indicator {
       position: absolute;
@@ -908,13 +1273,188 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
       // Render Visual Structures
       nodesContainer.innerHTML = '';
-      const struct = (step.visualStructures && step.visualStructures[0]);
-      if (struct) {
-        structureTypePill.textContent = struct.title || struct.kind;
-        renderRowStructure(struct);
+      if (step.buckets || step.activeLoop || step.inputRequest) {
+        structureTypePill.textContent = step.activeLoop ? 'Loop Visualization' : 'Variable State';
+        renderBucketsAndLoop(step);
       } else {
-        structureTypePill.textContent = 'Execution Flow';
-        renderEmptyCanvas('Waiting for program execution...');
+        const struct = (step.visualStructures && step.visualStructures[0]);
+        if (struct) {
+          structureTypePill.textContent = struct.title || struct.kind;
+          renderRowStructure(struct);
+        } else {
+          structureTypePill.textContent = 'Execution Flow';
+          renderEmptyCanvas('Waiting for program execution...');
+        }
+      }
+    }
+
+    function renderBucketsAndLoop(step) {
+      if (step.inputRequest && step.inputRequest.isWaiting) {
+        if (isPlaying) {
+          pausePlayback();
+          vscode.postMessage({ type: 'pause' });
+        }
+      }
+
+      const mainWrapper = document.createElement('div');
+      mainWrapper.style.display = 'flex';
+      mainWrapper.style.flexDirection = 'column';
+      mainWrapper.style.alignItems = 'center';
+      mainWrapper.style.gap = '20px';
+
+      // 1. Dedicated Loop Container
+      if (step.activeLoop) {
+        const loop = step.activeLoop;
+        const loopEl = document.createElement('div');
+        loopEl.className = 'loop-container is-active-loop';
+
+        const trackSvg = \`
+          <svg class="loop-cycle-track" viewBox="0 0 60 120">
+            <path class="cycle-path" d="M 10 10 C 50 10, 50 110, 10 110" />
+            <polyline points="15,105 10,110 15,115" stroke="#38bdf8" stroke-width="2.5" fill="none" />
+          </svg>
+        \`;
+
+        let phaseLabel = loop.phase.toUpperCase();
+        if (loop.phase === 'condition') {
+          phaseLabel = \`Condition: \${loop.conditionText} (\${loop.conditionPassed ? 'true' : 'false'})\`;
+        } else if (loop.phase === 'update') {
+          phaseLabel = \`Update: \${loop.variableName}++\`;
+        } else if (loop.phase === 'init') {
+          phaseLabel = \`Init: \${loop.variableName} = \${loop.currentValue}\`;
+        } else if (loop.phase === 'exit') {
+          phaseLabel = 'Loop Finished (Exit)';
+        }
+
+        let historyChipsHtml = '';
+        if (loop.previousValues && loop.previousValues.length > 0) {
+          historyChipsHtml = loop.previousValues.map(v => \`<span class="history-chip">\${v}</span>\`).join('<span class="history-arrow">➔</span>');
+        } else {
+          historyChipsHtml = '<span style="color:#64748b; font-size:11px;">(none yet)</span>';
+        }
+
+        loopEl.innerHTML = \`
+          \${trackSvg}
+          <div class="loop-header">
+            <div class="loop-title">
+              <span class="loop-badge">\${loop.loopType.toUpperCase()} LOOP</span>
+              <span>\${loop.headerText}</span>
+            </div>
+            <div class="loop-phase-pill">
+              <span>●</span>
+              <span>\${phaseLabel}</span>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:center; gap:30px; padding: 10px 0;">
+            <div class="var-bucket is-modified">
+              <span class="bucket-name-tag">\${loop.variableName}</span>
+              <div class="bucket-value-container">
+                <div class="bucket-current-val value-enter">\${loop.currentValue}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="loop-history-section">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="history-label">Previous values:</span>
+              <div class="history-chips-row">\${historyChipsHtml}</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="history-label">Current:</span>
+              <span class="history-current-chip">\${loop.currentValue}</span>
+            </div>
+          </div>
+        \`;
+
+        mainWrapper.appendChild(loopEl);
+      }
+
+      // 2. Variable Buckets (outside loop or all global variables)
+      const buckets = step.buckets || [];
+      const nonLoopBuckets = step.activeLoop 
+        ? buckets.filter(b => b.name !== step.activeLoop.variableName)
+        : buckets;
+
+      if (nonLoopBuckets.length > 0) {
+        const grid = document.createElement('div');
+        grid.className = 'buckets-grid';
+
+        nonLoopBuckets.forEach(b => {
+          const isWaitingThisInput = step.inputRequest && step.inputRequest.isWaiting && step.inputRequest.variableName === b.name;
+          const bucketEl = document.createElement('div');
+          bucketEl.className = 'var-bucket' 
+            + (b.isModified ? ' is-modified' : '') 
+            + (isWaitingThisInput ? ' is-waiting-input' : '');
+
+          let valHtml = '';
+          if (b.isEmpty || !b.value) {
+            valHtml = \`<div class="bucket-empty-placeholder">\${isWaitingThisInput ? 'awaiting input...' : 'empty'}</div>\`;
+          } else {
+            const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
+            valHtml = \`
+              \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
+              <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
+            \`;
+          }
+
+          bucketEl.innerHTML = \`
+            <span class="bucket-name-tag">\${b.name}</span>
+            <div class="bucket-value-container">
+              \${valHtml}
+            </div>
+          \`;
+          grid.appendChild(bucketEl);
+        });
+
+        mainWrapper.appendChild(grid);
+      }
+
+      // 3. User Input (cin) Prompt Card
+      if (step.inputRequest && step.inputRequest.isWaiting) {
+        const cinCard = document.createElement('div');
+        cinCard.className = 'cin-input-card';
+        cinCard.innerHTML = \`
+          <div class="cin-prompt-header">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="4 17 10 11 4 5"></polyline>
+              <line x1="12" y1="19" x2="20" y2="19"></line>
+            </svg>
+            <span>Waiting for input: <strong>cin &gt;&gt; \${step.inputRequest.variableName}</strong></span>
+          </div>
+          <div class="cin-input-row">
+            <input type="text" id="cinInputField" class="cin-input-field" placeholder="Enter value for \${step.inputRequest.variableName}..." />
+            <button id="cinSubmitBtn" class="cin-submit-btn">Submit ↵</button>
+          </div>
+        \`;
+        mainWrapper.appendChild(cinCard);
+      }
+
+      nodesContainer.appendChild(mainWrapper);
+
+      // Event listener for cin input
+      if (step.inputRequest && step.inputRequest.isWaiting) {
+        const field = document.getElementById('cinInputField');
+        const submitBtn = document.getElementById('cinSubmitBtn');
+        if (field && submitBtn) {
+          setTimeout(() => field.focus(), 60);
+          const doSubmit = () => {
+            const val = field.value.trim();
+            if (!val) return;
+            vscode.postMessage({
+              type: 'submitInput',
+              variableName: step.inputRequest.variableName,
+              value: val,
+              stepIndex: currentStepIndex
+            });
+          };
+          submitBtn.addEventListener('click', doSubmit);
+          field.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              doSubmit();
+            }
+          });
+        }
       }
     }
 

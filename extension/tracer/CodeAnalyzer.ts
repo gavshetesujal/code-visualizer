@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ExecutionStep, VisualStructure, VisualBlock, VisualConnection, StructureKind } from '../types';
+import { ProgramSimulator } from './ProgramSimulator';
 
 export interface CodeAnalysisResult {
   detectedKind: StructureKind;
@@ -40,6 +41,10 @@ export class CodeAnalyzer {
     }
     if (this.isArray(code)) {
       return this.analyzeArray(code, lines, fileName);
+    }
+
+    if (ProgramSimulator.canSimulate(code)) {
+      return ProgramSimulator.simulate(code, lines, fileName);
     }
 
     // Default: Clean Execution Flow (Functions, calculations, loops, if-else)
