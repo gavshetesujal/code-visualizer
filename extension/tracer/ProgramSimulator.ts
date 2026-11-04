@@ -9,6 +9,7 @@ import {
   ArrayMemoryCell,
   StructureKind
 } from '../types';
+import { DiagnosticLogger } from './DiagnosticLogger';
 
 export interface SimulationResult {
   steps: ExecutionStep[];
@@ -586,8 +587,10 @@ export class ProgramSimulator {
             const b = varMap.get(inputVar)!;
             let submittedVal: string | undefined = undefined;
 
-            if (cinCallIndex < orderedInputs.length) {
-              submittedVal = orderedInputs[cinCallIndex];
+            if (orderedInputs && orderedInputs.length > 0) {
+              if (cinCallIndex < orderedInputs.length) {
+                submittedVal = orderedInputs[cinCallIndex];
+              }
             } else if (providedInputs[inputVar] !== undefined && providedInputs[inputVar] !== '') {
               submittedVal = providedInputs[inputVar];
             }
@@ -600,6 +603,13 @@ export class ProgramSimulator {
               b.isEmpty = false;
               b.isModified = true;
 
+              DiagnosticLogger.log('INPUT_RECEIVED', `Applied terminal input to variable '${inputVar}'`, {
+                value: submittedVal,
+                previousValue: b.previousValue,
+                cinCallIndex,
+                line: cur.lineNum
+              });
+
               recordStep(
                 cur.lineNum,
                 `cin >> ${inputVar}; [received: ${submittedVal}]`,
@@ -608,6 +618,11 @@ export class ProgramSimulator {
               );
             } else {
               // Pause and request input via integrated terminal
+              DiagnosticLogger.log('INPUT_REQUEST', `Execution paused waiting for terminal input for '${inputVar}'`, {
+                cinCallIndex,
+                line: cur.lineNum
+              });
+
               recordStep(
                 cur.lineNum,
                 `cin >> ${inputVar};`,
@@ -854,17 +869,26 @@ export class ProgramSimulator {
             }
 
             const isUninitialized = !initVal;
-            if (!varMap.has(varName)) {
+            if (varMap.has(varName)) {
+              const existing = varMap.get(varName)!;
+              if (initVal) {
+                existing.previousValue = existing.value;
+                existing.value = initVal;
+                existing.isEmpty = false;
+                existing.isModified = true;
+              }
+              // If uninitialized, preserve existing bucket and previousValue so loop iterations don't wipe out value history
+            } else {
               varOrder.push(varName);
+              varMap.set(varName, {
+                name: varName,
+                value: initVal,
+                type: varType,
+                isEmpty: isUninitialized,
+                isNew: true,
+                scope: scopeName
+              });
             }
-            varMap.set(varName, {
-              name: varName,
-              value: initVal,
-              type: varType,
-              isEmpty: isUninitialized,
-              isNew: true,
-              scope: scopeName
-            });
 
             recordStep(
               cur.lineNum,

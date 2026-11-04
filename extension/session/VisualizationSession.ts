@@ -6,6 +6,7 @@ import { ExecutionHistory } from '../timeline/ExecutionHistory';
 import { RealExecutionEngine } from '../tracer/RealExecutionEngine';
 import { getWebviewHtml } from '../webview/getWebviewHtml';
 import { VisualizerTerminal } from './VisualizerTerminal';
+import { DiagnosticLogger } from '../tracer/DiagnosticLogger';
 
 export class VisualizationSession {
   private static activeSessions = new Map<string, VisualizationSession>();
@@ -20,6 +21,9 @@ export class VisualizationSession {
   private executionTerminal?: vscode.Terminal;
   private providedInputs: Record<string, string> = {};
   private orderedInputs: string[] = [];
+  private wasPlaying: boolean = false;
+  private isProcessingInput: boolean = false;
+  private inputQueue: string[] = [];
 
   private constructor(
     context: vscode.ExtensionContext,
@@ -27,6 +31,7 @@ export class VisualizationSession {
     initialData: SessionData
   ) {
     this.context = context;
+    DiagnosticLogger.initialize(context);
     this.documentUri = editor.document.uri;
     this.sessionData = initialData;
 
@@ -204,13 +209,19 @@ export class VisualizationSession {
             }
             break;
           case 'stepChange':
+            this.wasPlaying = false;
             this.history.goTo(msg.stepIndex);
+            DiagnosticLogger.log('NAVIGATION', `Webview stepChange to index ${msg.stepIndex}`);
             break;
           case 'play':
+            this.wasPlaying = true;
             this.history.play();
+            DiagnosticLogger.log('PLAYBACK', 'Visualizer playback started');
             break;
           case 'pause':
+            this.wasPlaying = false;
             this.history.pause();
+            DiagnosticLogger.log('PLAYBACK', 'Visualizer playback paused');
             break;
           case 'restart':
             await this.restartSession();
@@ -322,6 +333,9 @@ export class VisualizationSession {
 
       // When reaching cin >> varName, pause visualizer and request input in VS Code terminal
       if (step.inputRequest && step.inputRequest.isWaiting) {
+        DiagnosticLogger.log('INPUT_REQUEST', `Pausing for terminal input at line ${step.line}: "${step.statement}"`, {
+          variable: step.inputRequest.variableName
+        });
         this.history.pause();
         if (this.terminalPty) {
           this.terminalPty.promptForInput(step.inputRequest.variableName);
@@ -334,52 +348,105 @@ export class VisualizationSession {
   }
 
   /**
-   * Handles user input entered through the native VS Code integrated terminal
+   * Handles user input entered through the native VS Code integrated terminal.
+   * Queues requests sequentially to eliminate race conditions from rapid typing or multi-line pastes.
    */
   private async handleTerminalInput(input: string) {
+    this.inputQueue.push(input);
+    if (this.isProcessingInput) {
+      DiagnosticLogger.log('INPUT_QUEUE', `Input queued while busy: "${input}"`);
+      return;
+    }
+
+    this.isProcessingInput = true;
+    try {
+      while (this.inputQueue.length > 0) {
+        const nextInput = this.inputQueue.shift()!;
+        await this.processSingleTerminalInput(nextInput);
+      }
+    } finally {
+      this.isProcessingInput = false;
+    }
+  }
+
+  private async processSingleTerminalInput(input: string) {
     const trimmed = input.trim();
     if (!trimmed) return;
 
+    DiagnosticLogger.log('INPUT_RECEIVED', `Processing terminal input: "${trimmed}"`);
+
     // Support single token or multiple space-separated tokens (e.g. cin >> a >> b)
-    const tokens = trimmed.split(/\s+/);
+    const tokens = trimmed.split(/\s+/).filter(Boolean);
     for (const t of tokens) {
       this.orderedInputs.push(t);
     }
+
+    DiagnosticLogger.log('INPUT_QUEUE', `Current ordered inputs (${this.orderedInputs.length}): [${this.orderedInputs.join(', ')}]`);
 
     const editor = vscode.window.visibleTextEditors.find(
       e => e.document.uri.toString() === this.documentUri.toString()
     );
 
-    if (editor) {
-      this.sessionData = await RealExecutionEngine.executeAndTrace(
-        editor.document,
-        [],
-        this.providedInputs,
-        this.orderedInputs
-      );
+    if (!editor) {
+      DiagnosticLogger.log('WARN', 'Active editor not found during input processing');
+      return;
     }
 
-    // Advance to the step that has the newly received input
-    const currentStep = this.history.getCurrentStep();
-    const currIdx = currentStep ? currentStep.stepIndex : 0;
-    const nextIdx = Math.min(this.sessionData.steps.length - 1, currIdx + 1);
+    // Step index that was waiting for input prior to re-tracing
+    const previousWaitingIndex = this.history.getCurrentIndex();
+
+    // Re-execute and trace with new inputs
+    this.sessionData = await RealExecutionEngine.executeAndTrace(
+      editor.document,
+      [],
+      this.providedInputs,
+      this.orderedInputs
+    );
+
+    DiagnosticLogger.log(
+      'EXECUTION_RESUME',
+      `Re-traced execution with ${this.orderedInputs.length} inputs. Generated ${this.sessionData.steps.length} steps.`
+    );
+
+    // Target step is the step that received the input (previousWaitingIndex)
+    let targetStepIndex = previousWaitingIndex;
+    if (targetStepIndex >= this.sessionData.steps.length) {
+      targetStepIndex = this.sessionData.steps.length - 1;
+    }
+
+    // Explicitly update sessionData.currentStepIndex so webview initializes at targetStepIndex, NOT step 0!
+    this.sessionData.currentStepIndex = targetStepIndex;
 
     this.history.dispose();
-    this.history = new ExecutionHistory(this.sessionData.steps, nextIdx);
+    this.history = new ExecutionHistory(this.sessionData.steps, targetStepIndex);
     this.setupHistoryListener();
 
+    // Post fresh session to webview
     this.panel.webview.postMessage({
       type: 'init',
       session: this.sessionData
     });
     this.syncEditorDecoration();
 
-    // Check if subsequent step requires input, or prompt for next variable
-    const nextStep = this.history.getCurrentStep();
-    if (nextStep && nextStep.inputRequest && nextStep.inputRequest.isWaiting) {
+    DiagnosticLogger.log(
+      'SNAPSHOT_SYNC',
+      `Synchronized webview at step ${targetStepIndex} / ${this.sessionData.steps.length - 1}: "${this.sessionData.steps[targetStepIndex]?.statement}"`
+    );
+
+    // If the target step or subsequent step requires the NEXT input:
+    const targetStep = this.sessionData.steps[targetStepIndex];
+    if (targetStep && targetStep.inputRequest && targetStep.inputRequest.isWaiting) {
       this.history.pause();
-      this.terminalPty?.promptForInput(nextStep.inputRequest.variableName);
+      this.terminalPty?.promptForInput(targetStep.inputRequest.variableName);
       this.executionTerminal?.show(false);
+    } else if (this.wasPlaying) {
+      // Resume auto playback if user was in Play mode before input pause
+      setTimeout(() => {
+        if (this.wasPlaying && this.history.canGoForward()) {
+          this.history.next();
+          this.history.play();
+        }
+      }, 500);
     }
   }
 

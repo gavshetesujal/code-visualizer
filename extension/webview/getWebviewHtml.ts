@@ -1581,6 +1581,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
           historyChipsHtml = '<span style="color:#64748b; font-size:11px;">(none yet)</span>';
         }
 
+        const isWaitingLoopVar = step.inputRequest && step.inputRequest.isWaiting && step.inputRequest.variableName === loop.variableName;
+
         loopEl.innerHTML = \`
           \${trackSvg}
           <div class="loop-header">
@@ -1595,10 +1597,10 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
           </div>
 
           <div style="display:flex; align-items:center; justify-content:center; gap:30px; padding: 10px 0;">
-            <div class="var-bucket is-modified">
+            <div class="var-bucket \${loop.phase === 'update' ? 'is-modified' : ''} \${isWaitingLoopVar ? 'is-waiting-input' : ''}">
               <span class="bucket-name-tag">\${loop.variableName}</span>
               <div class="bucket-value-container">
-                <div class="bucket-current-val value-enter">\${loop.currentValue}</div>
+                <div class="bucket-current-val \${loop.phase === 'update' ? 'value-enter' : ''}">\${isWaitingLoopVar && !loop.currentValue ? 'awaiting input...' : loop.currentValue}</div>
               </div>
             </div>
           </div>
