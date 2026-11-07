@@ -7,7 +7,12 @@ import {
   FunctionCallFrame,
   ArrayMemoryStructure,
   ArrayMemoryCell,
-  StructureKind
+  StructureKind,
+  ClassContainerState,
+  ClassPathwayArrow,
+  ClassObjectInstance,
+  ClassMemberVariable,
+  ClassMemberFunction
 } from '../types';
 import { DiagnosticLogger } from './DiagnosticLogger';
 
@@ -23,6 +28,29 @@ interface FunctionDef {
   params: { type: string; name: string }[];
   startLine: number;
   bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+}
+
+interface ClassDef {
+  name: string;
+  startLine: number;
+  privateVariables: ClassMemberVariable[];
+  publicVariables: ClassMemberVariable[];
+  privateFunctions: {
+    name: string;
+    returnType: string;
+    access: 'private' | 'public';
+    params: { type: string; name: string }[];
+    startLine: number;
+    bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+  }[];
+  publicFunctions: {
+    name: string;
+    returnType: string;
+    access: 'private' | 'public';
+    params: { type: string; name: string }[];
+    startLine: number;
+    bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+  }[];
 }
 
 export class ProgramSimulator {
@@ -110,7 +138,8 @@ export class ProgramSimulator {
     const hasIf = /\bif\s*\(/.test(code);
     const hasAssign = /[a-zA-Z_]\w*\s*=\s*[^=]/.test(code);
     const hasFunc = /\b(int|void|float|double|char|string|bool)\s+[a-zA-Z_]\w*\s*\([^)]*\)/.test(code);
-    return hasVarDecl || hasLoop || hasCin || hasIf || hasAssign || hasFunc;
+    const hasClass = /\bclass\s+[a-zA-Z_]\w*/.test(code);
+    return hasVarDecl || hasLoop || hasCin || hasIf || hasAssign || hasFunc || hasClass;
   }
 
   /**
@@ -251,6 +280,9 @@ export class ProgramSimulator {
     // Cleaned lines with comments stripped and original 1-based line numbers preserved
     const cleanLines = this.cleanSourceLines(lines);
 
+    // 0. Extract class definitions
+    const classDefs = this.extractClasses(cleanLines);
+
     // 1. Extract non-main function definitions
     const functionDefs = this.extractFunctions(cleanLines);
 
@@ -262,6 +294,86 @@ export class ProgramSimulator {
     const activeFrameStack: FunctionCallFrame[] = [];
     let callCounter = 0;
     const MAX_RECURSION_DEPTH = 100;
+
+    // Track active object instances and class state
+    const objectInstances = new Map<string, ClassObjectInstance>();
+    let currentExecutingClass: string | undefined = undefined;
+    let currentExecutingObject: string | undefined = undefined;
+    let currentExecutingCompartment: 'private' | 'public' | 'none' = 'none';
+    let currentHighlightedMember: string | undefined = undefined;
+    let activePathwayArrow: ClassPathwayArrow | undefined = undefined;
+    let currentAccessViolation: ClassContainerState['accessViolation'] | undefined = undefined;
+
+    const makeClassSnapshot = (overrides?: Partial<ClassContainerState>): ClassContainerState | undefined => {
+      if (classDefs.size === 0) return undefined;
+      const clsName = currentExecutingClass || Array.from(classDefs.keys())[0];
+      const clsDef = classDefs.get(clsName);
+      if (!clsDef) return undefined;
+
+      const activeObjName = currentExecutingObject || (objectInstances.size > 0 ? Array.from(objectInstances.keys())[0] : undefined);
+      const activeObj = activeObjName ? objectInstances.get(activeObjName) : undefined;
+
+      const privBuckets: VariableBucket[] = clsDef.privateVariables.map(v => {
+        const val = activeObj ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
+        const prevVal = activeObj?.previousMemberValues ? activeObj.previousMemberValues[v.name] : undefined;
+        return {
+          name: v.name,
+          value: val,
+          type: v.type,
+          previousValue: prevVal,
+          isModified: activeObj?.isModifiedMember === v.name,
+          scope: `${clsName}::private`
+        };
+      });
+
+      const pubBuckets: VariableBucket[] = clsDef.publicVariables.map(v => {
+        const val = activeObj ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
+        const prevVal = activeObj?.previousMemberValues ? activeObj.previousMemberValues[v.name] : undefined;
+        return {
+          name: v.name,
+          value: val,
+          type: v.type,
+          previousValue: prevVal,
+          isModified: activeObj?.isModifiedMember === v.name,
+          scope: `${clsName}::public`
+        };
+      });
+
+      const privFuncs = clsDef.privateFunctions.map(f => ({
+        name: f.name,
+        signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
+        isActive: currentHighlightedMember === f.name
+      }));
+
+      const pubFuncs = clsDef.publicFunctions.map(f => ({
+        name: f.name,
+        signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
+        isActive: currentHighlightedMember === f.name
+      }));
+
+      const objectsList: ClassObjectInstance[] = Array.from(objectInstances.values()).map(o => ({
+        objectName: o.objectName,
+        className: o.className,
+        memberValues: { ...o.memberValues },
+        previousMemberValues: o.previousMemberValues ? { ...o.previousMemberValues } : undefined,
+        isModifiedMember: o.isModifiedMember
+      }));
+
+      return {
+        className: clsName,
+        activeObjectName: activeObjName,
+        objects: objectsList,
+        highlightedCompartment: currentExecutingCompartment,
+        highlightedMember: currentHighlightedMember,
+        activePathway: activePathwayArrow ? { ...activePathwayArrow } : undefined,
+        privateVariables: privBuckets,
+        publicVariables: pubBuckets,
+        privateFunctions: privFuncs,
+        publicFunctions: pubFuncs,
+        accessViolation: currentAccessViolation ? { ...currentAccessViolation } : undefined,
+        ...overrides
+      };
+    };
 
     const makeBucketsSnapshot = (modifiedName?: string): VariableBucket[] => {
       return varOrder.map(name => {
@@ -312,6 +424,7 @@ export class ProgramSimulator {
         inputReq?: InputRequestState;
         condEvent?: ConditionBranchEvent;
         funcFrame?: FunctionCallFrame;
+        classContainer?: ClassContainerState;
       } = {}
     ) => {
       const stepIdx = steps.length;
@@ -346,7 +459,8 @@ export class ProgramSimulator {
         conditionEvent: opts.condEvent,
         functionFrame: topFrame ? JSON.parse(JSON.stringify(topFrame)) : undefined,
         callStackFrames: activeFrameStack.length > 0 ? JSON.parse(JSON.stringify(activeFrameStack)) : undefined,
-        arrayStructures: makeArraysSnapshot()
+        arrayStructures: makeArraysSnapshot(),
+        classContainer: opts.classContainer !== undefined ? opts.classContainer : (classDefs.size > 0 ? makeClassSnapshot() : undefined)
       });
     };
 
@@ -376,6 +490,22 @@ export class ProgramSimulator {
           exp = exp.replace(new RegExp(`\\b${p.name}\\b`, 'g'), p.value || '0');
         });
       }
+
+      // 2.5 Resolve member variables of active class object if in class context
+      if (currentExecutingObject && objectInstances.has(currentExecutingObject)) {
+        const obj = objectInstances.get(currentExecutingObject)!;
+        Object.keys(obj.memberValues).forEach(mName => {
+          exp = exp.replace(new RegExp(`\\b${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
+          exp = exp.replace(new RegExp(`this->${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
+        });
+      }
+
+      // Also resolve obj.varName e.g. s.age or s1.age
+      objectInstances.forEach((obj, objName) => {
+        Object.keys(obj.memberValues).forEach(mName => {
+          exp = exp.replace(new RegExp(`\\b${objName}\\.${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
+        });
+      });
 
       // 3. Substitute global / main variables
       varMap.forEach((v, k) => {
@@ -642,8 +772,130 @@ export class ProgramSimulator {
       return parts;
     };
 
+    let executeStatements: (
+      stmts: { lineNum: number; raw: string; trimmed: string }[],
+      scopeName: string,
+      currentFrame?: FunctionCallFrame
+    ) => { hasReturned: boolean; returnValue?: string };
+
+    const executeClassMemberFunction = (
+      targetCls: ClassDef,
+      targetObj: ClassObjectInstance,
+      targetFunc: ClassDef['privateFunctions'][0] | ClassDef['publicFunctions'][0],
+      evaluatedArgs: string[],
+      callSig: string,
+      isInternalCall: boolean = false,
+      callerFrame?: FunctionCallFrame
+    ): string => {
+      callCounter++;
+      const frameId = `cls_call_${targetFunc.name}_${callCounter}`;
+      const callDepth = activeFrameStack.length + 1;
+
+      if (callDepth > MAX_RECURSION_DEPTH) {
+        recordStep(
+          targetFunc.startLine,
+          callSig,
+          `Execution safeguard: Maximum recursion depth (${MAX_RECURSION_DEPTH}) reached.`
+        );
+        return '0';
+      }
+
+      const prevExecutingClass = currentExecutingClass;
+      const prevExecutingObject = currentExecutingObject;
+      const prevExecutingCompartment = currentExecutingCompartment;
+      const prevHighlightedMember = currentHighlightedMember;
+
+      currentExecutingClass = targetCls.name;
+      currentExecutingObject = targetObj.objectName;
+      currentExecutingCompartment = targetFunc.access;
+      currentHighlightedMember = targetFunc.name;
+
+      // Bind parameters
+      const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => {
+        const val = evaluatedArgs[i] !== undefined ? evaluatedArgs[i] : '0';
+        return {
+          name: p.name,
+          value: val,
+          type: p.type,
+          scope: `${targetCls.name}::${targetFunc.name}`,
+          isNew: true
+        };
+      });
+
+      const frame: FunctionCallFrame = {
+        id: frameId,
+        functionName: `${targetCls.name}::${targetFunc.name}`,
+        callSignature: `${targetObj.objectName}.${targetFunc.name}(${evaluatedArgs.join(', ')})`,
+        parameters: paramBuckets,
+        localVariables: [],
+        callDepth,
+        state: 'active',
+        callerFrameId: callerFrame?.id,
+        callerFunctionName: callerFrame ? callerFrame.callSignature : 'main()'
+      };
+
+      if (callerFrame) {
+        callerFrame.state = 'waiting';
+        callerFrame.waitingForCallSignature = frame.callSignature;
+      }
+
+      activeFrameStack.push(frame);
+
+      recordStep(
+        targetFunc.startLine,
+        `${targetFunc.returnType} ${targetFunc.name}(${targetFunc.params.map((p, i) => `${p.type} ${p.name} = ${evaluatedArgs[i] || '0'}`).join(', ')})`,
+        `Entering ${targetFunc.access.toUpperCase()} member function '${targetFunc.name}()' on object '${targetObj.objectName}' (${targetCls.name}).`,
+        { funcFrame: frame }
+      );
+
+      // Execute body
+      let funcReturnValue = '0';
+      let hasExplicitReturn = false;
+
+      const result = executeStatements(targetFunc.bodyLines, `${targetCls.name}_${targetFunc.name}`, frame);
+      if (result && result.hasReturned) {
+        hasExplicitReturn = true;
+        funcReturnValue = result.returnValue !== undefined ? result.returnValue : '0';
+      }
+
+      if (isWaitingForInput) {
+        return funcReturnValue;
+      }
+
+      if (!hasExplicitReturn && targetFunc.returnType === 'void') {
+        funcReturnValue = '';
+      }
+
+      // Return step
+      frame.state = 'returning';
+      frame.returnValue = funcReturnValue;
+      frame.isReturning = true;
+
+      recordStep(
+        targetFunc.startLine,
+        targetFunc.returnType === 'void' ? `return;` : `return ${funcReturnValue};`,
+        `Member function '${targetFunc.name}()' completed, returning ${funcReturnValue ? funcReturnValue : 'void'}.`,
+        { funcFrame: frame }
+      );
+
+      frame.state = 'completed';
+      activeFrameStack.pop();
+
+      if (callerFrame) {
+        callerFrame.state = 'active';
+        callerFrame.waitingForCallSignature = undefined;
+      }
+
+      currentExecutingClass = prevExecutingClass;
+      currentExecutingObject = prevExecutingObject;
+      currentExecutingCompartment = prevExecutingCompartment;
+      currentHighlightedMember = prevHighlightedMember;
+
+      return funcReturnValue;
+    };
+
     // Statement Execution Engine
-    const executeStatements = (
+    executeStatements = (
       stmts: { lineNum: number; raw: string; trimmed: string }[],
       scopeName: string,
       currentFrame?: FunctionCallFrame
@@ -684,6 +936,266 @@ export class ProgramSimulator {
 
           idx++;
           return { hasReturned: true, returnValue: retVal };
+        }
+
+        // 0. Class Object Instantiation: e.g. Student s; or Student s1, s2;
+        const objDeclMatch = trimmed.match(/^([a-zA-Z_]\w*)\s+([^;()]+);$/);
+        if (objDeclMatch && classDefs.has(objDeclMatch[1])) {
+          const clsName = objDeclMatch[1];
+          const clsDef = classDefs.get(clsName)!;
+          const varListStr = objDeclMatch[2];
+          const objNames = varListStr.split(',').map(s => s.trim().split(/[\s=]/)[0]).filter(Boolean);
+
+          objNames.forEach(objName => {
+            const memberVals: Record<string, string> = {};
+            clsDef.privateVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
+            clsDef.publicVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
+
+            const newObj: ClassObjectInstance = {
+              objectName: objName,
+              className: clsName,
+              memberValues: memberVals
+            };
+            objectInstances.set(objName, newObj);
+            currentExecutingObject = objName;
+            currentExecutingClass = clsName;
+
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `Instantiated object '${objName}' of class '${clsName}'. Blueprint initialized with private & public member compartments.`
+            );
+          });
+          idx++;
+          continue;
+        }
+
+        // 0.1 Class Method Call on Object: e.g. s.display(); or s.calculate();
+        const objMethodMatch = trimmed.match(/^([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\s*\((.*?)\)\s*;?$/);
+        if (objMethodMatch && objectInstances.has(objMethodMatch[1])) {
+          const objName = objMethodMatch[1];
+          const methodName = objMethodMatch[2];
+          const rawArgs = objMethodMatch[3].trim();
+          const obj = objectInstances.get(objName)!;
+          const clsDef = classDefs.get(obj.className);
+
+          if (clsDef) {
+            const isPrivateFunc = clsDef.privateFunctions.some(f => f.name === methodName);
+            const isPrivateVar = clsDef.privateVariables.some(v => v.name === methodName);
+            if (isPrivateFunc || isPrivateVar) {
+              currentAccessViolation = {
+                attemptedMember: methodName,
+                attemptedAccess: 'private',
+                caller: currentFrame ? currentFrame.functionName : 'main()',
+                errorMessage: `Cannot access private member '${methodName}' of class '${clsDef.name}'. External callers are restricted to PUBLIC members.`
+              };
+              currentExecutingClass = clsDef.name;
+              currentExecutingObject = objName;
+              currentExecutingCompartment = 'private';
+              currentHighlightedMember = methodName;
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `🚫 Access Violation: External call '${objName}.${methodName}()' attempted to enter the PRIVATE compartment. Access blocked! Private members are strictly hidden from external code.`,
+                {
+                  classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                }
+              );
+              idx++;
+              continue;
+            }
+
+            const pubFunc = clsDef.publicFunctions.find(f => f.name === methodName);
+            if (pubFunc) {
+              currentAccessViolation = undefined;
+              currentExecutingClass = clsDef.name;
+              currentExecutingObject = objName;
+              currentExecutingCompartment = 'public';
+              currentHighlightedMember = methodName;
+
+              // Step 1: Pathway entrance through Opening A
+              activePathwayArrow = {
+                type: 'external-to-public',
+                fromLabel: currentFrame ? currentFrame.functionName : 'main()',
+                toLabel: `${objName}.${methodName}()`,
+                targetCompartment: 'public',
+                targetMember: methodName,
+                status: 'animating'
+              };
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `Access granted: External call '${objName}.${methodName}()' enters through Opening A into the PUBLIC compartment.`,
+                {
+                  classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                }
+              );
+
+              // Step 2: Execute function
+              const evaluatedArgs = rawArgs ? rawArgs.split(',').map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
+              executeClassMemberFunction(clsDef, obj, pubFunc, evaluatedArgs, `${objName}.${methodName}()`, false, currentFrame);
+
+              // Return transition through Opening A
+              activePathwayArrow = {
+                type: 'return-to-caller',
+                fromLabel: `${objName}.${methodName}()`,
+                toLabel: currentFrame ? currentFrame.functionName : 'main()',
+                targetCompartment: 'public',
+                status: 'completed'
+              };
+              recordStep(
+                cur.lineNum,
+                `// Returned from ${objName}.${methodName}()`,
+                `Completed execution of '${objName}.${methodName}()', exiting PUBLIC compartment through Opening A back to caller.`,
+                {
+                  classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                }
+              );
+              activePathwayArrow = undefined;
+              currentExecutingCompartment = 'none';
+              currentHighlightedMember = undefined;
+
+              idx++;
+              continue;
+            }
+          }
+        }
+
+        // 0.2 Internal Class Function Call: e.g. calculate(); inside display()
+        if (currentExecutingClass && currentExecutingObject) {
+          const internalCallMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*\((.*?)\)\s*;?$/);
+          if (internalCallMatch && !trimmed.startsWith('for') && !trimmed.startsWith('while') && !trimmed.startsWith('if') && !trimmed.startsWith('cout') && !trimmed.startsWith('cin') && !trimmed.startsWith('return')) {
+            const funcName = internalCallMatch[1];
+            const rawArgs = internalCallMatch[2].trim();
+            const clsDef = classDefs.get(currentExecutingClass);
+            const obj = objectInstances.get(currentExecutingObject)!;
+
+            if (clsDef) {
+              const privFunc = clsDef.privateFunctions.find(f => f.name === funcName);
+              const pubFunc = clsDef.publicFunctions.find(f => f.name === funcName);
+              const targetFunc = privFunc || pubFunc;
+
+              if (targetFunc) {
+                if (targetFunc.access === 'private') {
+                  activePathwayArrow = {
+                    type: 'public-to-private',
+                    fromLabel: currentHighlightedMember || 'public',
+                    toLabel: funcName,
+                    targetCompartment: 'private',
+                    targetMember: funcName,
+                    status: 'animating'
+                  };
+                  recordStep(
+                    cur.lineNum,
+                    trimmed,
+                    `Internal access allowed: '${currentHighlightedMember || 'class'}' calls private function '${funcName}()'. Execution arrow travels UPWARDS through Opening B into the PRIVATE compartment.`,
+                    {
+                      classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                    }
+                  );
+                }
+
+                const evaluatedArgs = rawArgs ? rawArgs.split(',').map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
+                executeClassMemberFunction(clsDef, obj, targetFunc, evaluatedArgs, `${funcName}()`, true, currentFrame);
+
+                if (targetFunc.access === 'private') {
+                  activePathwayArrow = {
+                    type: 'return-to-public',
+                    fromLabel: funcName,
+                    toLabel: currentHighlightedMember || 'display',
+                    targetCompartment: 'public',
+                    status: 'completed'
+                  };
+                  recordStep(
+                    cur.lineNum,
+                    `// Returned from ${funcName}()`,
+                    `Returned from private function '${funcName}()' through Opening B back to PUBLIC compartment.`,
+                    {
+                      classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                    }
+                  );
+                  activePathwayArrow = undefined;
+                }
+
+                idx++;
+                continue;
+              }
+            }
+          }
+        }
+
+        // 0.3 Member Variable Assignment inside class method: e.g. age = age + 1; or age = 20;
+        if (currentExecutingClass && currentExecutingObject) {
+          const assignMemberMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
+          if (assignMemberMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin')) {
+            const mVarName = assignMemberMatch[1];
+            const op = assignMemberMatch[2];
+            const expr = assignMemberMatch[3].trim();
+            const obj = objectInstances.get(currentExecutingObject)!;
+            const clsDef = classDefs.get(currentExecutingClass)!;
+
+            const isPriv = clsDef.privateVariables.some(v => v.name === mVarName);
+            const isPub = clsDef.publicVariables.some(v => v.name === mVarName);
+
+            if (isPriv || isPub) {
+              const oldVal = obj.memberValues[mVarName] ?? '0';
+              let newVal = evalExpressionWithCalls(expr, currentFrame);
+              if (op === '+=') newVal = String(parseFloat(oldVal) + parseFloat(newVal));
+              else if (op === '-=') newVal = String(parseFloat(oldVal) - parseFloat(newVal));
+              else if (op === '*=') newVal = String(parseFloat(oldVal) * parseFloat(newVal));
+              else if (op === '/=') newVal = String(parseFloat(oldVal) / (parseFloat(newVal) || 1));
+              else if (op === '%=') newVal = String(parseFloat(oldVal) % (parseFloat(newVal) || 1));
+
+              if (!obj.previousMemberValues) obj.previousMemberValues = {};
+              obj.previousMemberValues[mVarName] = oldVal;
+              obj.memberValues[mVarName] = newVal;
+              obj.isModifiedMember = mVarName;
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `Updated ${isPriv ? 'private' : 'public'} member variable '${mVarName}' in object '${obj.objectName}' from ${oldVal} to ${newVal}. Value updated in ${isPriv ? 'PRIVATE' : 'PUBLIC'} compartment bucket.`,
+                {
+                  classContainer: makeClassSnapshot({
+                    highlightedCompartment: isPriv ? 'private' : 'public',
+                    highlightedMember: mVarName
+                  }),
+                  funcFrame: currentFrame
+                }
+              );
+              idx++;
+              continue;
+            }
+          }
+        }
+
+        // 0.4 Direct Member Variable Access from outside (e.g. s.age = 25; or s.age;)
+        const directVarMatch = trimmed.match(/^([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\s*(=|\+=|-=|\*=|\/=|%=)?\s*(.*?);?$/);
+        if (directVarMatch && objectInstances.has(directVarMatch[1])) {
+          const objName = directVarMatch[1];
+          const mName = directVarMatch[2];
+          const obj = objectInstances.get(objName)!;
+          const clsDef = classDefs.get(obj.className);
+          if (clsDef && clsDef.privateVariables.some(v => v.name === mName)) {
+            currentAccessViolation = {
+              attemptedMember: mName,
+              attemptedAccess: 'private',
+              caller: currentFrame ? currentFrame.functionName : 'main()',
+              errorMessage: `Cannot access private member variable '${mName}' of class '${clsDef.name}'. Direct external access is forbidden.`
+            };
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `🚫 Access Violation: Attempted to access private member '${objName}.${mName}' directly from outside class. Blocked at boundary!`,
+              {
+                classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+              }
+            );
+            idx++;
+            continue;
+          }
         }
 
         // 1. FOR LOOP (supports nested for loops)
@@ -1561,14 +2073,136 @@ export class ProgramSimulator {
 
     steps.forEach(s => (s.totalSteps = steps.length));
 
+    const detectedKind: StructureKind = classDefs.size > 0 ? 'class' : (functionDefs.size > 0 ? 'workflow' : 'variables');
+    const structureTitle = classDefs.size > 0
+      ? `Class Blueprint & Objects (${Array.from(classDefs.keys())[0]})`
+      : (varOrder.length > 0 ? `Variables & State (${varOrder.length} Buckets)` : 'Program Execution');
+
     return {
       steps,
-      detectedKind: 'variables',
-      structureTitle: varOrder.length > 0 ? `Variables & State (${varOrder.length} Buckets)` : 'Program Execution'
+      detectedKind,
+      structureTitle
     };
   }
 
   // --- Helper Methods ---
+
+  private static extractClasses(
+    lines: { lineNum: number; raw: string; clean?: string; trimmed: string }[]
+  ): Map<string, ClassDef> {
+    const map = new Map<string, ClassDef>();
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trimmed;
+      const classMatch = line.match(/^class\s+([a-zA-Z_]\w*)/);
+      if (classMatch) {
+        const className = classMatch[1];
+        const classStartLine = lines[i].lineNum;
+        const { bodyLines, endLineIdx } = this.extractBlockBody(lines, i);
+
+        let currentAccess: 'private' | 'public' = 'private'; // default in C++ class
+        const privateVariables: ClassMemberVariable[] = [];
+        const publicVariables: ClassMemberVariable[] = [];
+        const privateFunctions: ClassDef['privateFunctions'] = [];
+        const publicFunctions: ClassDef['publicFunctions'] = [];
+
+        let bi = 0;
+        while (bi < bodyLines.length) {
+          const bLine = bodyLines[bi].trimmed;
+          if (!bLine || bLine === '{' || bLine === '}' || bLine === '};' || bLine === ';') {
+            bi++;
+            continue;
+          }
+
+          if (bLine.match(/^private\s*:/)) {
+            currentAccess = 'private';
+            bi++;
+            continue;
+          }
+          if (bLine.match(/^public\s*:/)) {
+            currentAccess = 'public';
+            bi++;
+            continue;
+          }
+
+          // Check for member function
+          const funcMatch = bLine.match(/^(?:(?:inline|static|virtual)\s+)?(int|void|float|double|char|string|bool)\s+([a-zA-Z_]\w*)\s*\((.*?)\)(?:\s*const)?\s*\{?$/);
+          if (funcMatch) {
+            const returnType = funcMatch[1];
+            const funcName = funcMatch[2];
+            const rawParams = funcMatch[3].trim();
+            const funcStartLine = bodyLines[bi].lineNum;
+            const params: { type: string; name: string }[] = [];
+
+            if (rawParams && rawParams !== 'void') {
+              rawParams.split(',').forEach(p => {
+                const parts = p.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                  params.push({ type: parts[0], name: parts[parts.length - 1].replace(/[&*\[\]]/g, '') });
+                }
+              });
+            }
+
+            const extracted = this.extractBlockBody(bodyLines, bi);
+            const memberFunc = {
+              name: funcName,
+              returnType,
+              access: currentAccess,
+              params,
+              startLine: funcStartLine,
+              bodyLines: extracted.bodyLines
+            };
+
+            if (currentAccess === 'private') {
+              privateFunctions.push(memberFunc);
+            } else {
+              publicFunctions.push(memberFunc);
+            }
+            bi = extracted.endLineIdx + 1;
+            continue;
+          }
+
+          // Check for member variable: e.g. int age = 20; or int age; or double marks;
+          const varMatch = bLine.match(/^(int|float|double|char|string|bool)\s+([a-zA-Z_]\w*)(?:\s*=\s*([^;]+))?;/);
+          if (varMatch) {
+            const varType = varMatch[1];
+            const varName = varMatch[2];
+            const defVal = varMatch[3] ? varMatch[3].trim() : (varType === 'int' ? '0' : varType === 'string' ? '""' : '0');
+            const memberVar: ClassMemberVariable = {
+              name: varName,
+              type: varType,
+              access: currentAccess,
+              defaultValue: defVal
+            };
+
+            if (currentAccess === 'private') {
+              privateVariables.push(memberVar);
+            } else {
+              publicVariables.push(memberVar);
+            }
+            bi++;
+            continue;
+          }
+
+          bi++;
+        }
+
+        map.set(className, {
+          name: className,
+          startLine: classStartLine,
+          privateVariables,
+          publicVariables,
+          privateFunctions,
+          publicFunctions
+        });
+
+        i = endLineIdx + 1;
+        continue;
+      }
+      i++;
+    }
+    return map;
+  }
 
   private static extractFunctions(
     lines: { lineNum: number; raw: string; trimmed: string }[]
@@ -1577,6 +2211,13 @@ export class ProgramSimulator {
     let i = 0;
     while (i < lines.length) {
       const line = lines[i].trimmed;
+
+      // Skip class definitions so member functions are not confused with global functions
+      if (line.match(/^class\s+[a-zA-Z_]\w*/)) {
+        const { endLineIdx } = this.extractBlockBody(lines, i);
+        i = endLineIdx + 1;
+        continue;
+      }
       const funcMatch = line.match(/^(int|void|float|double|char|string|bool)\s+([a-zA-Z_]\w*)\s*\((.*?)\)\s*\{?$/);
       if (funcMatch && funcMatch[2] !== 'main') {
         const returnType = funcMatch[1];

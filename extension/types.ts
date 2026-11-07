@@ -82,7 +82,8 @@ export type StructureKind =
   | 'workflow' 
   | 'pointers' 
   | 'objects' 
-  | 'variables';
+  | 'variables'
+  | 'class';
 
 export interface VisualStructure {
   id: string;
@@ -182,6 +183,57 @@ export interface ArrayMemoryStructure {
   cells: ArrayMemoryCell[];
 }
 
+export interface ClassMemberVariable {
+  name: string;
+  type: string;
+  access: 'private' | 'public';
+  defaultValue?: string;
+}
+
+export interface ClassMemberFunction {
+  name: string;
+  returnType: string;
+  access: 'private' | 'public';
+  params: { type: string; name: string }[];
+  startLine: number;
+}
+
+export interface ClassObjectInstance {
+  objectName: string;
+  className: string;
+  memberValues: Record<string, string>;
+  previousMemberValues?: Record<string, string>;
+  isModifiedMember?: string;
+}
+
+export interface ClassPathwayArrow {
+  type: 'external-to-public' | 'public-to-private' | 'return-to-public' | 'return-to-caller';
+  fromLabel: string;
+  toLabel: string;
+  targetCompartment: 'public' | 'private';
+  targetMember?: string;
+  status: 'animating' | 'active' | 'completed';
+}
+
+export interface ClassContainerState {
+  className: string;
+  activeObjectName?: string;
+  objects: ClassObjectInstance[];
+  highlightedCompartment?: 'private' | 'public' | 'none';
+  highlightedMember?: string;
+  activePathway?: ClassPathwayArrow;
+  privateVariables: VariableBucket[];
+  publicVariables: VariableBucket[];
+  privateFunctions: { name: string; signature: string; isActive?: boolean }[];
+  publicFunctions: { name: string; signature: string; isActive?: boolean }[];
+  accessViolation?: {
+    attemptedMember: string;
+    attemptedAccess: 'private';
+    caller: string;
+    errorMessage: string;
+  };
+}
+
 export interface ExecutionStep {
   stepIndex: number;
   totalSteps: number;
@@ -207,6 +259,7 @@ export interface ExecutionStep {
   belongsToGroupId?: string;
   isGroupCollapsed?: boolean;
   iterationIndex?: number;
+  classContainer?: ClassContainerState;
 }
 
 export interface SessionData {

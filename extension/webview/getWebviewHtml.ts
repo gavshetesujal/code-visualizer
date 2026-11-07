@@ -1460,6 +1460,359 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       color: #94a3b8;
       white-space: nowrap;
     }
+
+    /* ========================================================= */
+    /* C++ CLASS VISUALIZATION CONTAINER & PATHWAYS              */
+    /* ========================================================= */
+
+    .class-container-root {
+      position: relative;
+      width: 100%;
+      max-width: 680px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .class-blueprint-box {
+      background: rgba(13, 21, 39, 0.95);
+      border: 2px solid #3b82f6;
+      border-radius: 18px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65), 0 0 35px rgba(59, 130, 246, 0.2);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .class-blueprint-box.is-violation {
+      border-color: #ef4444;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 45px rgba(239, 68, 68, 0.4);
+      animation: alertPulse 1.2s infinite;
+    }
+
+    @keyframes alertPulse {
+      0%, 100% { border-color: #ef4444; }
+      50% { border-color: #f87171; box-shadow: 0 0 50px rgba(239, 68, 68, 0.6); }
+    }
+
+    .class-header-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: rgba(30, 58, 138, 0.25);
+      border-bottom: 1.5px solid rgba(59, 130, 246, 0.25);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .class-identity-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 800;
+      color: #60a5fa;
+      letter-spacing: 0.5px;
+    }
+
+    .class-instances-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .class-instance-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+
+    .class-instance-chip.is-active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #38bdf8;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+    }
+
+    /* COMPARTMENTS */
+    .compartment-private {
+      background: rgba(239, 68, 68, 0.03);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      position: relative;
+      transition: all 0.3s ease;
+    }
+
+    .compartment-private.is-active-compartment {
+      background: rgba(239, 68, 68, 0.08);
+    }
+
+    .compartment-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .compartment-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.8px;
+    }
+
+    .badge-private {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+
+    .badge-public {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d599;
+    }
+
+    .compartment-access-rule {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: #64748b;
+    }
+
+    /* OPENING B: INTERNAL DIVIDER PATHWAY */
+    .divider-opening-b-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      height: 32px;
+      margin: 0;
+    }
+
+    .divider-left-line, .divider-right-line {
+      flex: 1;
+      height: 2px;
+      background: rgba(59, 130, 246, 0.3);
+    }
+
+    .opening-b-gateway {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0f172a;
+      border: 1.5px dashed #60a5fa;
+      border-radius: 8px;
+      padding: 4px 14px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: #93c5fd;
+      letter-spacing: 0.5px;
+      z-index: 5;
+      transition: all 0.3s ease;
+    }
+
+    .opening-b-gateway.is-active-gateway {
+      border: 2px solid #38bdf8;
+      background: rgba(56, 189, 248, 0.2);
+      color: #ffffff;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
+      transform: scale(1.05);
+    }
+
+    /* PUBLIC COMPARTMENT & OPENING A */
+    .compartment-public-wrap {
+      position: relative;
+      display: flex;
+    }
+
+    /* OPENING A NOTCH ON LEFT BORDER */
+    .opening-a-notch {
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      background: #0b1120;
+      border: 1.5px dashed #10b981;
+      border-left: none;
+      border-radius: 0 8px 8px 0;
+      padding: 6px 10px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 800;
+      color: #34d599;
+      letter-spacing: 0.5px;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 2px 0 10px rgba(16, 185, 129, 0.2);
+      transition: all 0.3s ease;
+    }
+
+    .opening-a-notch.is-active-entrance {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.25);
+      color: #ffffff;
+      box-shadow: 4px 0 20px rgba(56, 189, 248, 0.7);
+      transform: translateY(-50%) scale(1.06);
+    }
+
+    .compartment-public {
+      flex: 1;
+      background: rgba(16, 185, 129, 0.03);
+      padding: 20px 24px 20px 42px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: all 0.3s ease;
+    }
+
+    .compartment-public.is-active-compartment {
+      background: rgba(16, 185, 129, 0.08);
+    }
+
+    /* MEMBER FUNCTIONS AREA */
+    .member-funcs-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .member-funcs-title {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .member-funcs-grid {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .class-func-card {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1.5px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #cbd5e1;
+      transition: all 0.25s ease;
+    }
+
+    .class-func-card.is-active-func {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+      color: #ffffff;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .func-access-pill {
+      font-size: 9px;
+      font-weight: 800;
+      padding: 2px 5px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+
+    .func-access-pill.private {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .func-access-pill.public {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d599;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    /* PATHWAY ARROW BANNER */
+    .pathway-flow-banner {
+      background: rgba(15, 23, 42, 0.95);
+      border: 1.5px solid #38bdf8;
+      border-radius: 12px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #e2e8f0;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+      animation: bannerSlideIn 0.3s ease;
+    }
+
+    @keyframes bannerSlideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .pathway-icon-pill {
+      background: #38bdf8;
+      color: #0b1120;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    /* ACCESS VIOLATION ALERT */
+    .access-violation-alert {
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid #ef4444;
+      border-radius: 12px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      color: #fca5a5;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+      animation: alertPulse 1.2s infinite;
+    }
+
+    .violation-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #f87171;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
   </style>
 </head>
 <body>
@@ -1862,6 +2215,243 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         mainWrapper.appendChild(banner);
       }
 
+      // 1.5 C++ Class Blueprint & Object State
+      if (step.classContainer) {
+        const cls = step.classContainer;
+        const classRoot = document.createElement('div');
+        classRoot.className = 'class-container-root';
+
+        // Access Violation Alert
+        if (cls.accessViolation) {
+          const v = cls.accessViolation;
+          const alertEl = document.createElement('div');
+          alertEl.className = 'access-violation-alert';
+          alertEl.innerHTML = \`
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>
+            <div>
+              <div class="violation-title">🚫 ACCESS VIOLATION / COMPILATION ERROR</div>
+              <div>\${v.errorMessage}</div>
+              <div style="font-size:11px; color:#fca5a5; margin-top:4px;">Attempted external access to <strong>'\${v.attemptedMember}'</strong> from <strong>'\${v.caller}'</strong> was blocked at the class boundary.</div>
+            </div>
+          \`;
+          classRoot.appendChild(alertEl);
+        }
+
+        // Active Pathway Banner
+        if (cls.activePathway) {
+          const p = cls.activePathway;
+          const bannerEl = document.createElement('div');
+          bannerEl.className = 'pathway-flow-banner';
+          let pathwayText = '';
+          let iconText = '';
+          if (p.type === 'external-to-public') {
+            iconText = '➔ OPENING A';
+            pathwayText = \`External Call: '\${p.toLabel}' enters through Opening A into the PUBLIC compartment.\`;
+          } else if (p.type === 'public-to-private') {
+            iconText = '▲ OPENING B';
+            pathwayText = \`Internal Call: '\${p.fromLabel}()' calls private '\${p.toLabel}()' upwards through Divider Opening B into the PRIVATE compartment.\`;
+          } else if (p.type === 'return-to-public') {
+            iconText = '▼ OPENING B';
+            pathwayText = \`Return Transition: '\${p.fromLabel}()' returns value back through Divider Opening B into PUBLIC compartment.\`;
+          } else if (p.type === 'return-to-caller') {
+            iconText = '⬅ OPENING A';
+            pathwayText = \`Exit Transition: '\${p.fromLabel}' finishes, exiting through Opening A back to caller '\${p.toLabel}'.\`;
+          }
+
+          bannerEl.innerHTML = \`
+            <span class="pathway-icon-pill">\${iconText}</span>
+            <span>\${pathwayText}</span>
+          \`;
+          classRoot.appendChild(bannerEl);
+        }
+
+        const isGatewayBActive = cls.activePathway && (cls.activePathway.type === 'public-to-private' || cls.activePathway.type === 'return-to-public');
+        const isEntranceAActive = cls.activePathway && (cls.activePathway.type === 'external-to-public' || cls.activePathway.type === 'return-to-caller');
+
+        const boxEl = document.createElement('div');
+        boxEl.className = 'class-blueprint-box' + (cls.accessViolation ? ' is-violation' : '');
+
+        // Header Bar
+        let instancesHtml = '';
+        if (cls.objects && cls.objects.length > 0) {
+          instancesHtml = \`
+            <div class="class-instances-bar">
+              <span style="font-size:11px; color:#64748b; font-weight:700; font-family:var(--font-mono);">OBJECTS:</span>
+              \${cls.objects.map(obj => \`
+                <span class="class-instance-chip \${obj.objectName === cls.activeObjectName ? 'is-active' : ''}">
+                  <span style="width:6px; height:6px; border-radius:50%; background:\${obj.objectName === cls.activeObjectName ? '#38bdf8' : '#64748b'};"></span>
+                  <span>\${obj.objectName}</span>
+                  \${obj.objectName === cls.activeObjectName ? '<span style="font-size:9px; opacity:0.8;">(active)</span>' : ''}
+                </span>
+              \`).join('')}
+            </div>
+          \`;
+        }
+
+        let modeBadgeHtml = '';
+        if (cls.highlightedCompartment === 'private') {
+          modeBadgeHtml = '<span class="compartment-badge badge-private">● ACTIVE: PRIVATE</span>';
+        } else if (cls.highlightedCompartment === 'public') {
+          modeBadgeHtml = '<span class="compartment-badge badge-public">● ACTIVE: PUBLIC</span>';
+        } else {
+          modeBadgeHtml = '<span style="color:#64748b; font-size:11px; font-family:var(--font-mono); font-weight:600;">ACCESS: IDLE</span>';
+        }
+
+        boxEl.innerHTML = \`
+          <div class="class-header-bar">
+            <div class="class-identity-badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+              <span>CLASS: <strong>\${cls.className}</strong></span>
+            </div>
+            \${instancesHtml}
+            <div>\${modeBadgeHtml}</div>
+          </div>
+        \`;
+
+        // UPPER COMPARTMENT: PRIVATE
+        const privEl = document.createElement('div');
+        privEl.className = 'compartment-private' + (cls.highlightedCompartment === 'private' ? ' is-active-compartment' : '');
+
+        let privBucketsHtml = '';
+        if (cls.privateVariables && cls.privateVariables.length > 0) {
+          privBucketsHtml = \`
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <div class="member-funcs-title">Private Member Variables:</div>
+              <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
+                \${cls.privateVariables.map(b => {
+                  const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
+                  return \`
+                    <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
+                      <span class="bucket-name-tag">\${b.name}</span>
+                      <div class="bucket-value-container">
+                        \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
+                        <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
+                      </div>
+                    </div>
+                  \`;
+                }).join('')}
+              </div>
+            </div>
+          \`;
+        }
+
+        let privFuncsHtml = '';
+        if (cls.privateFunctions && cls.privateFunctions.length > 0) {
+          privFuncsHtml = \`
+            <div class="member-funcs-section">
+              <div class="member-funcs-title">Private Member Functions:</div>
+              <div class="member-funcs-grid">
+                \${cls.privateFunctions.map(f => \`
+                  <div class="class-func-card \${f.name === cls.highlightedMember ? 'is-active-func' : ''}">
+                    <span class="func-access-pill private">private</span>
+                    <span><strong>\${f.signature}</strong></span>
+                  </div>
+                \`).join('')}
+              </div>
+            </div>
+          \`;
+        }
+
+        privEl.innerHTML = \`
+          <div class="compartment-header">
+            <div class="compartment-badge badge-private">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              <span>PRIVATE COMPARTMENT</span>
+            </div>
+            <span class="compartment-access-rule">🔒 Internal class access only (Direct external access forbidden)</span>
+          </div>
+          \${privBucketsHtml}
+          \${privFuncsHtml}
+        \`;
+        boxEl.appendChild(privEl);
+
+        // DIVIDER WITH OPENING B
+        const dividerEl = document.createElement('div');
+        dividerEl.className = 'divider-opening-b-wrap';
+        dividerEl.innerHTML = \`
+          <div class="divider-left-line"></div>
+          <div class="opening-b-gateway \${isGatewayBActive ? 'is-active-gateway' : ''}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            <span>OPENING B: Internal Divider Gateway</span>
+          </div>
+          <div class="divider-right-line"></div>
+        \`;
+        boxEl.appendChild(dividerEl);
+
+        // LOWER COMPARTMENT: PUBLIC WITH OPENING A
+        const pubWrap = document.createElement('div');
+        pubWrap.className = 'compartment-public-wrap';
+
+        // Opening A Notch on left wall
+        const notchA = document.createElement('div');
+        notchA.className = 'opening-a-notch' + (isEntranceAActive ? ' is-active-entrance' : '');
+        notchA.innerHTML = \`
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          <span>OPENING A (Public Entrance)</span>
+        \`;
+        pubWrap.appendChild(notchA);
+
+        const pubEl = document.createElement('div');
+        pubEl.className = 'compartment-public' + (cls.highlightedCompartment === 'public' ? ' is-active-compartment' : '');
+
+        let pubBucketsHtml = '';
+        if (cls.publicVariables && cls.publicVariables.length > 0) {
+          pubBucketsHtml = \`
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <div class="member-funcs-title">Public Member Variables:</div>
+              <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
+                \${cls.publicVariables.map(b => {
+                  const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
+                  return \`
+                    <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
+                      <span class="bucket-name-tag">\${b.name}</span>
+                      <div class="bucket-value-container">
+                        \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
+                        <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
+                      </div>
+                    </div>
+                  \`;
+                }).join('')}
+              </div>
+            </div>
+          \`;
+        }
+
+        let pubFuncsHtml = '';
+        if (cls.publicFunctions && cls.publicFunctions.length > 0) {
+          pubFuncsHtml = \`
+            <div class="member-funcs-section">
+              <div class="member-funcs-title">Public Member Functions:</div>
+              <div class="member-funcs-grid">
+                \${cls.publicFunctions.map(f => \`
+                  <div class="class-func-card \${f.name === cls.highlightedMember ? 'is-active-func' : ''}">
+                    <span class="func-access-pill public">public</span>
+                    <span><strong>\${f.signature}</strong></span>
+                  </div>
+                \`).join('')}
+              </div>
+            </div>
+          \`;
+        }
+
+        pubEl.innerHTML = \`
+          <div class="compartment-header">
+            <div class="compartment-badge badge-public">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+              <span>PUBLIC COMPARTMENT</span>
+            </div>
+            <span class="compartment-access-rule">🔓 External calls enter via Opening A</span>
+          </div>
+          \${pubBucketsHtml}
+          \${pubFuncsHtml}
+        \`;
+        pubWrap.appendChild(pubEl);
+        boxEl.appendChild(pubWrap);
+
+        classRoot.appendChild(boxEl);
+        mainWrapper.appendChild(classRoot);
+      }
+
       // 2. Recursive Call Stack & Function Frames
       if (step.callStackFrames && step.callStackFrames.length > 0) {
         const frames = step.callStackFrames;
@@ -2123,7 +2713,16 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       // 5. Variable Buckets (outside loop or all global/local variables)
       const buckets = step.buckets || [];
       const loopVarNames = loopsToRender.map(l => l.variableName);
-      const nonLoopBuckets = buckets.filter(b => !loopVarNames.includes(b.name) && !b.isOutOfScope);
+      let nonLoopBuckets = buckets.filter(b => !loopVarNames.includes(b.name) && !b.isOutOfScope);
+      if (step.classContainer) {
+        // Exclude class member variables and object names from generic outer buckets
+        const clsVarNames = new Set([
+          ...step.classContainer.privateVariables.map(v => v.name),
+          ...step.classContainer.publicVariables.map(v => v.name),
+          ...step.classContainer.objects.map(o => o.objectName)
+        ]);
+        nonLoopBuckets = nonLoopBuckets.filter(b => !clsVarNames.has(b.name));
+      }
 
       if (nonLoopBuckets.length > 0) {
         const grid = document.createElement('div');
