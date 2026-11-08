@@ -12,7 +12,13 @@ import {
   ClassPathwayArrow,
   ClassObjectInstance,
   ClassMemberVariable,
-  ClassMemberFunction
+  ClassMemberFunction,
+  BaseClassInheritance,
+  InheritedMemberInfo,
+  InheritanceRelationship,
+  SingleClassViewState,
+  ClassAccessSpecifier,
+  InheritanceAccessMode
 } from '../types';
 import { DiagnosticLogger } from './DiagnosticLogger';
 
@@ -33,23 +39,36 @@ interface FunctionDef {
 interface ClassDef {
   name: string;
   startLine: number;
+  baseClasses: BaseClassInheritance[];
   privateVariables: ClassMemberVariable[];
+  protectedVariables: ClassMemberVariable[];
   publicVariables: ClassMemberVariable[];
   privateFunctions: {
     name: string;
     returnType: string;
-    access: 'private' | 'public';
+    access: 'private';
     params: { type: string; name: string }[];
     startLine: number;
     bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+    declaringClass: string;
+  }[];
+  protectedFunctions: {
+    name: string;
+    returnType: string;
+    access: 'protected';
+    params: { type: string; name: string }[];
+    startLine: number;
+    bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+    declaringClass: string;
   }[];
   publicFunctions: {
     name: string;
     returnType: string;
-    access: 'private' | 'public';
+    access: 'public';
     params: { type: string; name: string }[];
     startLine: number;
     bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+    declaringClass: string;
   }[];
 }
 
@@ -299,57 +318,20 @@ export class ProgramSimulator {
     const objectInstances = new Map<string, ClassObjectInstance>();
     let currentExecutingClass: string | undefined = undefined;
     let currentExecutingObject: string | undefined = undefined;
-    let currentExecutingCompartment: 'private' | 'public' | 'none' = 'none';
+    let currentExecutingCompartment: 'private' | 'protected' | 'public' | 'none' = 'none';
     let currentHighlightedMember: string | undefined = undefined;
     let activePathwayArrow: ClassPathwayArrow | undefined = undefined;
     let currentAccessViolation: ClassContainerState['accessViolation'] | undefined = undefined;
 
+    const hierarchyTiers = ProgramSimulator.calculateHierarchyTiers(classDefs);
+
     const makeClassSnapshot = (overrides?: Partial<ClassContainerState>): ClassContainerState | undefined => {
       if (classDefs.size === 0) return undefined;
-      const clsName = currentExecutingClass || Array.from(classDefs.keys())[0];
-      const clsDef = classDefs.get(clsName);
-      if (!clsDef) return undefined;
-
       const activeObjName = currentExecutingObject || (objectInstances.size > 0 ? Array.from(objectInstances.keys())[0] : undefined);
       const activeObj = activeObjName ? objectInstances.get(activeObjName) : undefined;
-
-      const privBuckets: VariableBucket[] = clsDef.privateVariables.map(v => {
-        const val = activeObj ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
-        const prevVal = activeObj?.previousMemberValues ? activeObj.previousMemberValues[v.name] : undefined;
-        return {
-          name: v.name,
-          value: val,
-          type: v.type,
-          previousValue: prevVal,
-          isModified: activeObj?.isModifiedMember === v.name,
-          scope: `${clsName}::private`
-        };
-      });
-
-      const pubBuckets: VariableBucket[] = clsDef.publicVariables.map(v => {
-        const val = activeObj ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
-        const prevVal = activeObj?.previousMemberValues ? activeObj.previousMemberValues[v.name] : undefined;
-        return {
-          name: v.name,
-          value: val,
-          type: v.type,
-          previousValue: prevVal,
-          isModified: activeObj?.isModifiedMember === v.name,
-          scope: `${clsName}::public`
-        };
-      });
-
-      const privFuncs = clsDef.privateFunctions.map(f => ({
-        name: f.name,
-        signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
-        isActive: currentHighlightedMember === f.name
-      }));
-
-      const pubFuncs = clsDef.publicFunctions.map(f => ({
-        name: f.name,
-        signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
-        isActive: currentHighlightedMember === f.name
-      }));
+      const primaryClsName = currentExecutingClass || (activeObj ? activeObj.className : Array.from(classDefs.keys())[0]);
+      const primaryClsDef = classDefs.get(primaryClsName);
+      if (!primaryClsDef) return undefined;
 
       const objectsList: ClassObjectInstance[] = Array.from(objectInstances.values()).map(o => ({
         objectName: o.objectName,
@@ -359,17 +341,162 @@ export class ProgramSimulator {
         isModifiedMember: o.isModifiedMember
       }));
 
+      const classViewsList: SingleClassViewState[] = [];
+      const relationships: InheritanceRelationship[] = [];
+
+      classDefs.forEach(clsDef => {
+        const clsName = clsDef.name;
+        const inherited = ProgramSimulator.resolveInheritance(clsName, classDefs);
+
+        const isObjInstanceOfThisOrDerived = activeObj
+          ? (activeObj.className === clsName || ProgramSimulator.isSubclassOf(activeObj.className, clsName, classDefs))
+          : false;
+
+        const privBuckets: VariableBucket[] = clsDef.privateVariables.map(v => {
+          const val = (isObjInstanceOfThisOrDerived && activeObj) ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
+          const prevVal = (isObjInstanceOfThisOrDerived && activeObj?.previousMemberValues) ? activeObj.previousMemberValues[v.name] : undefined;
+          return {
+            name: v.name,
+            value: val,
+            type: v.type,
+            previousValue: prevVal,
+            isModified: isObjInstanceOfThisOrDerived && activeObj?.isModifiedMember === v.name,
+            scope: `${clsName}::private`
+          };
+        });
+
+        const protBuckets: VariableBucket[] = clsDef.protectedVariables.map(v => {
+          const val = (isObjInstanceOfThisOrDerived && activeObj) ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
+          const prevVal = (isObjInstanceOfThisOrDerived && activeObj?.previousMemberValues) ? activeObj.previousMemberValues[v.name] : undefined;
+          return {
+            name: v.name,
+            value: val,
+            type: v.type,
+            previousValue: prevVal,
+            isModified: isObjInstanceOfThisOrDerived && activeObj?.isModifiedMember === v.name,
+            scope: `${clsName}::protected`
+          };
+        });
+
+        const pubBuckets: VariableBucket[] = clsDef.publicVariables.map(v => {
+          const val = (isObjInstanceOfThisOrDerived && activeObj) ? (activeObj.memberValues[v.name] ?? v.defaultValue ?? '0') : (v.defaultValue ?? '0');
+          const prevVal = (isObjInstanceOfThisOrDerived && activeObj?.previousMemberValues) ? activeObj.previousMemberValues[v.name] : undefined;
+          return {
+            name: v.name,
+            value: val,
+            type: v.type,
+            previousValue: prevVal,
+            isModified: isObjInstanceOfThisOrDerived && activeObj?.isModifiedMember === v.name,
+            scope: `${clsName}::public`
+          };
+        });
+
+        const privFuncs = clsDef.privateFunctions.map(f => ({
+          name: f.name,
+          signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
+          isActive: currentExecutingClass === clsName && currentHighlightedMember === f.name
+        }));
+
+        const protFuncs = clsDef.protectedFunctions.map(f => ({
+          name: f.name,
+          signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
+          isActive: currentExecutingClass === clsName && currentHighlightedMember === f.name
+        }));
+
+        const pubFuncs = clsDef.publicFunctions.map(f => ({
+          name: f.name,
+          signature: `${f.returnType} ${f.name}(${f.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
+          isActive: currentExecutingClass === clsName && currentHighlightedMember === f.name
+        }));
+
+        const inheritedInfoList: InheritedMemberInfo[] = [];
+        inherited.inheritedVariables.forEach(iv => {
+          const val = (isObjInstanceOfThisOrDerived && activeObj) ? (activeObj.memberValues[iv.name] ?? iv.defaultValue ?? '0') : (iv.defaultValue ?? '0');
+          const prevVal = (isObjInstanceOfThisOrDerived && activeObj?.previousMemberValues) ? activeObj.previousMemberValues[iv.name] : undefined;
+          inheritedInfoList.push({
+            name: iv.name,
+            originalClassName: iv.originalClassName,
+            originalAccess: iv.originalAccess,
+            effectiveAccess: iv.effectiveAccess,
+            kind: 'variable',
+            typeOrReturnType: iv.type,
+            value: val,
+            previousValue: prevVal,
+            isModified: isObjInstanceOfThisOrDerived && activeObj?.isModifiedMember === iv.name,
+            isActive: currentHighlightedMember === iv.name
+          });
+        });
+
+        inherited.inheritedFunctions.forEach(ifn => {
+          inheritedInfoList.push({
+            name: ifn.name,
+            originalClassName: ifn.originalClassName,
+            originalAccess: ifn.originalAccess,
+            effectiveAccess: ifn.effectiveAccess,
+            kind: 'function',
+            typeOrReturnType: ifn.returnType,
+            signature: `${ifn.returnType} ${ifn.name}(${ifn.params.map(p => `${p.type} ${p.name}`).join(', ')})`,
+            isActive: currentHighlightedMember === ifn.name
+          });
+        });
+
+        let isParent = false;
+        classDefs.forEach(other => {
+          if (other.baseClasses.some(b => b.baseClassName === clsName)) isParent = true;
+        });
+        const isChild = clsDef.baseClasses.length > 0;
+
+        classViewsList.push({
+          className: clsName,
+          isParent,
+          isChild,
+          baseClasses: clsDef.baseClasses,
+          hierarchyTier: hierarchyTiers.get(clsName) || 0,
+          privateVariables: privBuckets,
+          protectedVariables: protBuckets,
+          publicVariables: pubBuckets,
+          privateFunctions: privFuncs,
+          protectedFunctions: protFuncs,
+          publicFunctions: pubFuncs,
+          inheritedMembers: inheritedInfoList,
+          highlightedCompartment: currentExecutingClass === clsName ? currentExecutingCompartment : 'none',
+          highlightedMember: currentExecutingClass === clsName ? currentHighlightedMember : undefined
+        });
+
+        clsDef.baseClasses.forEach(b => {
+          const isRelActive = activePathwayArrow?.type === 'child-to-parent' || activePathwayArrow?.type === 'return-to-child';
+          const isThisRel = isRelActive && (
+            (activePathwayArrow?.fromLabel === clsName && activePathwayArrow?.toLabel.includes(b.baseClassName)) ||
+            (activePathwayArrow?.fromLabel.includes(b.baseClassName) && activePathwayArrow?.toLabel === clsName)
+          );
+          relationships.push({
+            childClassName: clsName,
+            parentClassName: b.baseClassName,
+            accessMode: b.accessMode,
+            isActive: isThisRel,
+            statusLabel: isThisRel ? 'Calling parent' : undefined
+          });
+        });
+      });
+
+      const primaryView = classViewsList.find(c => c.className === primaryClsName) || classViewsList[0];
+
       return {
-        className: clsName,
+        className: primaryClsName,
         activeObjectName: activeObjName,
         objects: objectsList,
+        classes: classViewsList,
+        inheritanceRelationships: relationships,
+        inheritedMembers: primaryView.inheritedMembers,
         highlightedCompartment: currentExecutingCompartment,
         highlightedMember: currentHighlightedMember,
         activePathway: activePathwayArrow ? { ...activePathwayArrow } : undefined,
-        privateVariables: privBuckets,
-        publicVariables: pubBuckets,
-        privateFunctions: privFuncs,
-        publicFunctions: pubFuncs,
+        privateVariables: primaryView.privateVariables,
+        protectedVariables: primaryView.protectedVariables,
+        publicVariables: primaryView.publicVariables,
+        privateFunctions: primaryView.privateFunctions,
+        protectedFunctions: primaryView.protectedFunctions,
+        publicFunctions: primaryView.publicFunctions,
         accessViolation: currentAccessViolation ? { ...currentAccessViolation } : undefined,
         ...overrides
       };
@@ -781,7 +908,7 @@ export class ProgramSimulator {
     const executeClassMemberFunction = (
       targetCls: ClassDef,
       targetObj: ClassObjectInstance,
-      targetFunc: ClassDef['privateFunctions'][0] | ClassDef['publicFunctions'][0],
+      targetFunc: ClassDef['privateFunctions'][0] | ClassDef['protectedFunctions'][0] | ClassDef['publicFunctions'][0],
       evaluatedArgs: string[],
       callSig: string,
       isInternalCall: boolean = false,
@@ -810,6 +937,8 @@ export class ProgramSimulator {
       currentExecutingCompartment = targetFunc.access;
       currentHighlightedMember = targetFunc.name;
 
+      const declaringClsName = targetFunc.declaringClass || targetCls.name;
+
       // Bind parameters
       const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => {
         const val = evaluatedArgs[i] !== undefined ? evaluatedArgs[i] : '0';
@@ -817,14 +946,14 @@ export class ProgramSimulator {
           name: p.name,
           value: val,
           type: p.type,
-          scope: `${targetCls.name}::${targetFunc.name}`,
+          scope: `${declaringClsName}::${targetFunc.name}`,
           isNew: true
         };
       });
 
       const frame: FunctionCallFrame = {
         id: frameId,
-        functionName: `${targetCls.name}::${targetFunc.name}`,
+        functionName: `${declaringClsName}::${targetFunc.name}`,
         callSignature: `${targetObj.objectName}.${targetFunc.name}(${evaluatedArgs.join(', ')})`,
         parameters: paramBuckets,
         localVariables: [],
@@ -844,7 +973,7 @@ export class ProgramSimulator {
       recordStep(
         targetFunc.startLine,
         `${targetFunc.returnType} ${targetFunc.name}(${targetFunc.params.map((p, i) => `${p.type} ${p.name} = ${evaluatedArgs[i] || '0'}`).join(', ')})`,
-        `Entering ${targetFunc.access.toUpperCase()} member function '${targetFunc.name}()' on object '${targetObj.objectName}' (${targetCls.name}).`,
+        `Entering ${targetFunc.access.toUpperCase()} member function '${declaringClsName}::${targetFunc.name}()' on object '${targetObj.objectName}' (${targetObj.className}).`,
         { funcFrame: frame }
       );
 
@@ -852,7 +981,7 @@ export class ProgramSimulator {
       let funcReturnValue = '0';
       let hasExplicitReturn = false;
 
-      const result = executeStatements(targetFunc.bodyLines, `${targetCls.name}_${targetFunc.name}`, frame);
+      const result = executeStatements(targetFunc.bodyLines, `${declaringClsName}_${targetFunc.name}`, frame);
       if (result && result.hasReturned) {
         hasExplicitReturn = true;
         funcReturnValue = result.returnValue !== undefined ? result.returnValue : '0';
@@ -874,7 +1003,7 @@ export class ProgramSimulator {
       recordStep(
         targetFunc.startLine,
         targetFunc.returnType === 'void' ? `return;` : `return ${funcReturnValue};`,
-        `Member function '${targetFunc.name}()' completed, returning ${funcReturnValue ? funcReturnValue : 'void'}.`,
+        `Member function '${declaringClsName}::${targetFunc.name}()' completed, returning ${funcReturnValue ? funcReturnValue : 'void'}.`,
         { funcFrame: frame }
       );
 
@@ -938,17 +1067,24 @@ export class ProgramSimulator {
           return { hasReturned: true, returnValue: retVal };
         }
 
-        // 0. Class Object Instantiation: e.g. Student s; or Student s1, s2;
+        // 0. Class Object Instantiation: e.g. Student s; or Dog d; or Dog d1, d2;
         const objDeclMatch = trimmed.match(/^([a-zA-Z_]\w*)\s+([^;()]+);$/);
         if (objDeclMatch && classDefs.has(objDeclMatch[1])) {
           const clsName = objDeclMatch[1];
           const clsDef = classDefs.get(clsName)!;
           const varListStr = objDeclMatch[2];
           const objNames = varListStr.split(',').map(s => s.trim().split(/[\s=]/)[0]).filter(Boolean);
+          const inherited = ProgramSimulator.resolveInheritance(clsName, classDefs);
 
           objNames.forEach(objName => {
             const memberVals: Record<string, string> = {};
+            // 1. Inherited variables from all ancestor classes
+            inherited.inheritedVariables.forEach(v => {
+              memberVals[v.name] = v.defaultValue || '0';
+            });
+            // 2. Direct variables
             clsDef.privateVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
+            clsDef.protectedVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
             clsDef.publicVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
 
             const newObj: ClassObjectInstance = {
@@ -960,17 +1096,21 @@ export class ProgramSimulator {
             currentExecutingObject = objName;
             currentExecutingClass = clsName;
 
+            const baseSummary = clsDef.baseClasses && clsDef.baseClasses.length > 0
+              ? ` (inheriting from ${clsDef.baseClasses.map(b => `${b.accessMode} ${b.baseClassName}`).join(', ')})`
+              : '';
+
             recordStep(
               cur.lineNum,
               trimmed,
-              `Instantiated object '${objName}' of class '${clsName}'. Blueprint initialized with private & public member compartments.`
+              `Instantiated object '${objName}' of class '${clsName}'${baseSummary}. Blueprint initialized with member compartments and inherited state.`
             );
           });
           idx++;
           continue;
         }
 
-        // 0.1 Class Method Call on Object: e.g. s.display(); or s.calculate();
+        // 0.1 Class Method Call on Object: e.g. s.display(); or d.eat(); or d.bark();
         const objMethodMatch = trimmed.match(/^([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\s*\((.*?)\)\s*;?$/);
         if (objMethodMatch && objectInstances.has(objMethodMatch[1])) {
           const objName = objMethodMatch[1];
@@ -980,9 +1120,14 @@ export class ProgramSimulator {
           const clsDef = classDefs.get(obj.className);
 
           if (clsDef) {
-            const isPrivateFunc = clsDef.privateFunctions.some(f => f.name === methodName);
-            const isPrivateVar = clsDef.privateVariables.some(v => v.name === methodName);
-            if (isPrivateFunc || isPrivateVar) {
+            // Check direct members in clsDef first
+            const directPrivFunc = clsDef.privateFunctions.find(f => f.name === methodName);
+            const directProtFunc = clsDef.protectedFunctions.find(f => f.name === methodName);
+            const directPubFunc = clsDef.publicFunctions.find(f => f.name === methodName);
+            const directPrivVar = clsDef.privateVariables.find(v => v.name === methodName);
+            const directProtVar = clsDef.protectedVariables.find(v => v.name === methodName);
+
+            if (directPrivFunc || directPrivVar) {
               currentAccessViolation = {
                 attemptedMember: methodName,
                 attemptedAccess: 'private',
@@ -997,7 +1142,7 @@ export class ProgramSimulator {
               recordStep(
                 cur.lineNum,
                 trimmed,
-                `🚫 Access Violation: External call '${objName}.${methodName}()' attempted to enter the PRIVATE compartment. Access blocked! Private members are strictly hidden from external code.`,
+                `🚫 Access Violation: External call '${objName}.${methodName}()' attempted to enter the PRIVATE compartment of '${clsDef.name}'. Access blocked! Private members are strictly hidden from external code.`,
                 {
                   classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
                 }
@@ -1006,8 +1151,31 @@ export class ProgramSimulator {
               continue;
             }
 
-            const pubFunc = clsDef.publicFunctions.find(f => f.name === methodName);
-            if (pubFunc) {
+            if (directProtFunc || directProtVar) {
+              currentAccessViolation = {
+                attemptedMember: methodName,
+                attemptedAccess: 'protected',
+                caller: currentFrame ? currentFrame.functionName : 'main()',
+                errorMessage: `Cannot access protected member '${methodName}' of class '${clsDef.name}'. Protected members can only be accessed within the class or its derived classes.`
+              };
+              currentExecutingClass = clsDef.name;
+              currentExecutingObject = objName;
+              currentExecutingCompartment = 'protected';
+              currentHighlightedMember = methodName;
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `🚫 Access Violation: External call '${objName}.${methodName}()' attempted to access PROTECTED member. Access blocked! Protected members are not accessible from external callers like main().`,
+                {
+                  classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                }
+              );
+              idx++;
+              continue;
+            }
+
+            if (directPubFunc) {
               currentAccessViolation = undefined;
               currentExecutingClass = clsDef.name;
               currentExecutingObject = objName;
@@ -1021,13 +1189,14 @@ export class ProgramSimulator {
                 toLabel: `${objName}.${methodName}()`,
                 targetCompartment: 'public',
                 targetMember: methodName,
+                targetClass: clsDef.name,
                 status: 'animating'
               };
 
               recordStep(
                 cur.lineNum,
                 trimmed,
-                `Access granted: External call '${objName}.${methodName}()' enters through Opening A into the PUBLIC compartment.`,
+                `Access granted: External call '${objName}.${methodName}()' enters through Opening A into the PUBLIC compartment of '${clsDef.name}'.`,
                 {
                   classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
                 }
@@ -1035,7 +1204,7 @@ export class ProgramSimulator {
 
               // Step 2: Execute function
               const evaluatedArgs = rawArgs ? rawArgs.split(',').map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
-              executeClassMemberFunction(clsDef, obj, pubFunc, evaluatedArgs, `${objName}.${methodName}()`, false, currentFrame);
+              executeClassMemberFunction(clsDef, obj, directPubFunc, evaluatedArgs, `${clsDef.name}::${methodName}()`, false, currentFrame);
 
               // Return transition through Opening A
               activePathwayArrow = {
@@ -1043,12 +1212,13 @@ export class ProgramSimulator {
                 fromLabel: `${objName}.${methodName}()`,
                 toLabel: currentFrame ? currentFrame.functionName : 'main()',
                 targetCompartment: 'public',
+                targetClass: clsDef.name,
                 status: 'completed'
               };
               recordStep(
                 cur.lineNum,
                 `// Returned from ${objName}.${methodName}()`,
-                `Completed execution of '${objName}.${methodName}()', exiting PUBLIC compartment through Opening A back to caller.`,
+                `Completed execution of '${objName}.${methodName}()', exiting through Opening A back to caller.`,
                 {
                   classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
                 }
@@ -1060,10 +1230,187 @@ export class ProgramSimulator {
               idx++;
               continue;
             }
+
+            // Not found directly: check inherited members!
+            const inherited = ProgramSimulator.resolveInheritance(obj.className, classDefs);
+            const inhFunc = inherited.inheritedFunctions.find(f => f.name === methodName);
+
+            if (inhFunc) {
+              if (inhFunc.effectiveAccess === 'inaccessible') {
+                currentAccessViolation = {
+                  attemptedMember: methodName,
+                  attemptedAccess: 'private',
+                  caller: currentFrame ? currentFrame.functionName : 'main()',
+                  errorMessage: `Cannot access private member '${methodName}' of parent class '${inhFunc.originalClassName}'. Private members are not directly accessible to derived class '${obj.className}'.`
+                };
+                currentExecutingClass = obj.className;
+                currentExecutingObject = objName;
+                currentExecutingCompartment = 'private';
+                currentHighlightedMember = methodName;
+
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: External call '${objName}.${methodName}()' attempted to invoke private member of parent class '${inhFunc.originalClassName}'. Inaccessible in child class '${obj.className}'!`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              if (inhFunc.effectiveAccess === 'protected') {
+                currentAccessViolation = {
+                  attemptedMember: methodName,
+                  attemptedAccess: 'protected',
+                  caller: currentFrame ? currentFrame.functionName : 'main()',
+                  errorMessage: `Cannot access protected member '${methodName}' in object of type '${obj.className}'. Protected members cannot be accessed directly from external callers like main().`
+                };
+                currentExecutingClass = obj.className;
+                currentExecutingObject = objName;
+                currentExecutingCompartment = 'protected';
+                currentHighlightedMember = methodName;
+
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: '${methodName}()' is protected in derived class '${obj.className}'. External access forbidden!`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              if (inhFunc.effectiveAccess === 'private') {
+                currentAccessViolation = {
+                  attemptedMember: methodName,
+                  attemptedAccess: 'private',
+                  caller: currentFrame ? currentFrame.functionName : 'main()',
+                  errorMessage: `Cannot access member '${methodName}' in object of type '${obj.className}'. Private inheritance restricts access to class '${obj.className}' only.`
+                };
+                currentExecutingClass = obj.className;
+                currentExecutingObject = objName;
+                currentExecutingCompartment = 'private';
+                currentHighlightedMember = methodName;
+
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: Private inheritance prevents external access to '${methodName}()' on '${obj.className}'!`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              if (inhFunc.effectiveAccess === 'public') {
+                // Public inherited member: ANIMATE INHERITANCE PATHWAY!
+                currentAccessViolation = undefined;
+                currentExecutingClass = obj.className;
+                currentExecutingObject = objName;
+                currentExecutingCompartment = 'public';
+                currentHighlightedMember = methodName;
+
+                // Step 1: External call into child class
+                activePathwayArrow = {
+                  type: 'external-to-public',
+                  fromLabel: currentFrame ? currentFrame.functionName : 'main()',
+                  toLabel: `${objName}.${methodName}()`,
+                  targetCompartment: 'public',
+                  targetMember: methodName,
+                  targetClass: obj.className,
+                  status: 'animating'
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `Access granted: External call '${objName}.${methodName}()' enters child class '${obj.className}' through Opening A. Calls inherited member '${methodName}()'.`,
+                  {
+                    classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                  }
+                );
+
+                // Step 2: Animate arrow towards parent class along inheritance link
+                activePathwayArrow = {
+                  type: 'child-to-parent',
+                  fromLabel: obj.className,
+                  toLabel: `${inhFunc.declaringClass}::${methodName}()`,
+                  targetCompartment: 'public',
+                  targetMember: methodName,
+                  targetClass: inhFunc.declaringClass,
+                  status: 'animating'
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `Inheritance Dispatch: Dispatched '${objName}.${methodName}()' to declaring parent class '${inhFunc.declaringClass}'. Arrow points from '${obj.className}' towards '${inhFunc.declaringClass}'.`,
+                  {
+                    classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                  }
+                );
+
+                // Step 3: Execute in parent class
+                const parentDef = classDefs.get(inhFunc.declaringClass)!;
+                const parentFuncDef = parentDef.publicFunctions.find(f => f.name === methodName)
+                  || parentDef.protectedFunctions.find(f => f.name === methodName);
+
+                const evaluatedArgs = rawArgs ? rawArgs.split(',').map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
+                if (parentFuncDef) {
+                  executeClassMemberFunction(parentDef, obj, parentFuncDef, evaluatedArgs, `${inhFunc.declaringClass}::${methodName}()`, false, currentFrame);
+                }
+
+                // Step 4: Return from parent back to child
+                activePathwayArrow = {
+                  type: 'return-to-child',
+                  fromLabel: `${inhFunc.declaringClass}::${methodName}()`,
+                  toLabel: obj.className,
+                  targetCompartment: 'public',
+                  targetClass: obj.className,
+                  status: 'completed'
+                };
+                recordStep(
+                  cur.lineNum,
+                  `// Returned from ${inhFunc.declaringClass}::${methodName}()`,
+                  `Returned from parent function '${inhFunc.declaringClass}::${methodName}()' back along inheritance link to child class '${obj.className}'.`,
+                  {
+                    classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                  }
+                );
+
+                // Step 5: Exit back to caller
+                activePathwayArrow = {
+                  type: 'return-to-caller',
+                  fromLabel: obj.className,
+                  toLabel: currentFrame ? currentFrame.functionName : 'main()',
+                  targetCompartment: 'public',
+                  targetClass: obj.className,
+                  status: 'completed'
+                };
+                recordStep(
+                  cur.lineNum,
+                  `// Returned from ${objName}.${methodName}()`,
+                  `Completed execution of '${objName}.${methodName}()', exiting through Opening A back to caller.`,
+                  {
+                    classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                  }
+                );
+                activePathwayArrow = undefined;
+                currentExecutingCompartment = 'none';
+                currentHighlightedMember = undefined;
+
+                idx++;
+                continue;
+              }
+            }
           }
         }
 
-        // 0.2 Internal Class Function Call: e.g. calculate(); inside display()
+        // 0.2 Internal Class Function Call: e.g. calculate(); inside display() or eat(); inside bark()
         if (currentExecutingClass && currentExecutingObject) {
           const internalCallMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*\((.*?)\)\s*;?$/);
           if (internalCallMatch && !trimmed.startsWith('for') && !trimmed.startsWith('while') && !trimmed.startsWith('if') && !trimmed.startsWith('cout') && !trimmed.startsWith('cin') && !trimmed.startsWith('return')) {
@@ -1074,17 +1421,19 @@ export class ProgramSimulator {
 
             if (clsDef) {
               const privFunc = clsDef.privateFunctions.find(f => f.name === funcName);
+              const protFunc = clsDef.protectedFunctions.find(f => f.name === funcName);
               const pubFunc = clsDef.publicFunctions.find(f => f.name === funcName);
-              const targetFunc = privFunc || pubFunc;
+              const targetDirectFunc = privFunc || protFunc || pubFunc;
 
-              if (targetFunc) {
-                if (targetFunc.access === 'private') {
+              if (targetDirectFunc) {
+                if (targetDirectFunc.access === 'private') {
                   activePathwayArrow = {
                     type: 'public-to-private',
                     fromLabel: currentHighlightedMember || 'public',
                     toLabel: funcName,
                     targetCompartment: 'private',
                     targetMember: funcName,
+                    targetClass: clsDef.name,
                     status: 'animating'
                   };
                   recordStep(
@@ -1098,14 +1447,15 @@ export class ProgramSimulator {
                 }
 
                 const evaluatedArgs = rawArgs ? rawArgs.split(',').map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
-                executeClassMemberFunction(clsDef, obj, targetFunc, evaluatedArgs, `${funcName}()`, true, currentFrame);
+                executeClassMemberFunction(clsDef, obj, targetDirectFunc, evaluatedArgs, `${funcName}()`, true, currentFrame);
 
-                if (targetFunc.access === 'private') {
+                if (targetDirectFunc.access === 'private') {
                   activePathwayArrow = {
                     type: 'return-to-public',
                     fromLabel: funcName,
                     toLabel: currentHighlightedMember || 'display',
                     targetCompartment: 'public',
+                    targetClass: clsDef.name,
                     status: 'completed'
                   };
                   recordStep(
@@ -1118,6 +1468,80 @@ export class ProgramSimulator {
                   );
                   activePathwayArrow = undefined;
                 }
+
+                idx++;
+                continue;
+              }
+
+              // Check if it's an inherited function!
+              const inherited = ProgramSimulator.resolveInheritance(currentExecutingClass, classDefs);
+              const inhFunc = inherited.inheritedFunctions.find(f => f.name === funcName);
+
+              if (inhFunc) {
+                if (inhFunc.effectiveAccess === 'inaccessible') {
+                  currentAccessViolation = {
+                    attemptedMember: funcName,
+                    attemptedAccess: 'private',
+                    caller: currentHighlightedMember || currentExecutingClass,
+                    errorMessage: `Cannot access private member '${funcName}' of parent class '${inhFunc.originalClassName}' from child class '${currentExecutingClass}'.`
+                  };
+                  recordStep(
+                    cur.lineNum,
+                    trimmed,
+                    `🚫 Access Violation: Child class '${currentExecutingClass}' attempted to call private parent function '${funcName}()'. Forbidden!`,
+                    {
+                      classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                    }
+                  );
+                  idx++;
+                  continue;
+                }
+
+                // Internal call to inherited public or protected function is allowed!
+                activePathwayArrow = {
+                  type: 'child-to-parent',
+                  fromLabel: currentExecutingClass,
+                  toLabel: `${inhFunc.declaringClass}::${funcName}()`,
+                  targetCompartment: 'public',
+                  targetMember: funcName,
+                  targetClass: inhFunc.declaringClass,
+                  status: 'animating'
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `Inheritance Call: Member function '${currentHighlightedMember || 'method'}' in '${currentExecutingClass}' calls inherited function '${funcName}()' (declared in '${inhFunc.declaringClass}').`,
+                  {
+                    classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                  }
+                );
+
+                const parentDef = classDefs.get(inhFunc.declaringClass)!;
+                const parentFuncDef = parentDef.publicFunctions.find(f => f.name === funcName)
+                  || parentDef.protectedFunctions.find(f => f.name === funcName);
+
+                const evaluatedArgs = rawArgs ? rawArgs.split(',').map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
+                if (parentFuncDef) {
+                  executeClassMemberFunction(parentDef, obj, parentFuncDef, evaluatedArgs, `${inhFunc.declaringClass}::${funcName}()`, true, currentFrame);
+                }
+
+                activePathwayArrow = {
+                  type: 'return-to-child',
+                  fromLabel: `${inhFunc.declaringClass}::${funcName}()`,
+                  toLabel: currentExecutingClass,
+                  targetCompartment: 'public',
+                  targetClass: currentExecutingClass,
+                  status: 'completed'
+                };
+                recordStep(
+                  cur.lineNum,
+                  `// Returned from ${inhFunc.declaringClass}::${funcName}()`,
+                  `Returned from parent function '${inhFunc.declaringClass}::${funcName}()' back to '${currentExecutingClass}'.`,
+                  {
+                    classContainer: makeClassSnapshot({ activePathway: activePathwayArrow })
+                  }
+                );
+                activePathwayArrow = undefined;
 
                 idx++;
                 continue;
@@ -1137,9 +1561,66 @@ export class ProgramSimulator {
             const clsDef = classDefs.get(currentExecutingClass)!;
 
             const isPriv = clsDef.privateVariables.some(v => v.name === mVarName);
+            const isProt = clsDef.protectedVariables.some(v => v.name === mVarName);
             const isPub = clsDef.publicVariables.some(v => v.name === mVarName);
 
-            if (isPriv || isPub) {
+            if (isPriv || isProt || isPub) {
+              const oldVal = obj.memberValues[mVarName] ?? '0';
+              let newVal = evalExpressionWithCalls(expr, currentFrame);
+              if (op === '+=') newVal = String(parseFloat(oldVal) + parseFloat(newVal));
+              else if (op === '-=') newVal = String(parseFloat(oldVal) - parseFloat(newVal));
+              else if (op === '*=') newVal = String(parseFloat(oldVal) * parseFloat(newVal));
+              else if (op === '/=') newVal = String(parseFloat(oldVal) / (parseFloat(newVal) || 1));
+              else if (op === '%=') newVal = String(parseFloat(oldVal) % (parseFloat(newVal) || 1));
+
+              if (!obj.previousMemberValues) obj.previousMemberValues = {};
+              obj.previousMemberValues[mVarName] = oldVal;
+              obj.memberValues[mVarName] = newVal;
+              obj.isModifiedMember = mVarName;
+
+              const compLabel = isPriv ? 'PRIVATE' : isProt ? 'PROTECTED' : 'PUBLIC';
+
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `Updated ${compLabel.toLowerCase()} member variable '${mVarName}' in object '${obj.objectName}' from ${oldVal} to ${newVal}. Value updated in ${compLabel} compartment bucket.`,
+                {
+                  classContainer: makeClassSnapshot({
+                    highlightedCompartment: isPriv ? 'private' : isProt ? 'protected' : 'public',
+                    highlightedMember: mVarName
+                  }),
+                  funcFrame: currentFrame
+                }
+              );
+              idx++;
+              continue;
+            }
+
+            // Check if it's an inherited variable!
+            const inherited = ProgramSimulator.resolveInheritance(currentExecutingClass, classDefs);
+            const inhVar = inherited.inheritedVariables.find(v => v.name === mVarName);
+
+            if (inhVar) {
+              if (inhVar.effectiveAccess === 'inaccessible') {
+                currentAccessViolation = {
+                  attemptedMember: mVarName,
+                  attemptedAccess: 'private',
+                  caller: currentHighlightedMember || currentExecutingClass,
+                  errorMessage: `Cannot access private member variable '${mVarName}' of parent class '${inhVar.originalClassName}' from derived class '${currentExecutingClass}'.`
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: Cannot access private parent member '${mVarName}' from child class '${currentExecutingClass}'.`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              // Update inherited variable
               const oldVal = obj.memberValues[mVarName] ?? '0';
               let newVal = evalExpressionWithCalls(expr, currentFrame);
               if (op === '+=') newVal = String(parseFloat(oldVal) + parseFloat(newVal));
@@ -1156,10 +1637,10 @@ export class ProgramSimulator {
               recordStep(
                 cur.lineNum,
                 trimmed,
-                `Updated ${isPriv ? 'private' : 'public'} member variable '${mVarName}' in object '${obj.objectName}' from ${oldVal} to ${newVal}. Value updated in ${isPriv ? 'PRIVATE' : 'PUBLIC'} compartment bucket.`,
+                `Updated inherited member variable '${mVarName}' (declared in '${inhVar.originalClassName}') in object '${obj.objectName}' from ${oldVal} to ${newVal}.`,
                 {
                   classContainer: makeClassSnapshot({
-                    highlightedCompartment: isPriv ? 'private' : 'public',
+                    highlightedCompartment: 'public',
                     highlightedMember: mVarName
                   }),
                   funcFrame: currentFrame
@@ -1171,30 +1652,184 @@ export class ProgramSimulator {
           }
         }
 
-        // 0.4 Direct Member Variable Access from outside (e.g. s.age = 25; or s.age;)
+        // 0.4 Direct Member Variable Access from outside (e.g. d.age = 5; or d.age;)
         const directVarMatch = trimmed.match(/^([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\s*(=|\+=|-=|\*=|\/=|%=)?\s*(.*?);?$/);
         if (directVarMatch && objectInstances.has(directVarMatch[1])) {
           const objName = directVarMatch[1];
           const mName = directVarMatch[2];
+          const op = directVarMatch[3];
+          const expr = directVarMatch[4]?.trim();
           const obj = objectInstances.get(objName)!;
           const clsDef = classDefs.get(obj.className);
-          if (clsDef && clsDef.privateVariables.some(v => v.name === mName)) {
-            currentAccessViolation = {
-              attemptedMember: mName,
-              attemptedAccess: 'private',
-              caller: currentFrame ? currentFrame.functionName : 'main()',
-              errorMessage: `Cannot access private member variable '${mName}' of class '${clsDef.name}'. Direct external access is forbidden.`
-            };
-            recordStep(
-              cur.lineNum,
-              trimmed,
-              `🚫 Access Violation: Attempted to access private member '${objName}.${mName}' directly from outside class. Blocked at boundary!`,
-              {
-                classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+
+          if (clsDef) {
+            // Check direct in clsDef
+            const isDirectPriv = clsDef.privateVariables.some(v => v.name === mName);
+            const isDirectProt = clsDef.protectedVariables.some(v => v.name === mName);
+            const isDirectPub = clsDef.publicVariables.some(v => v.name === mName);
+
+            if (isDirectPriv) {
+              currentAccessViolation = {
+                attemptedMember: mName,
+                attemptedAccess: 'private',
+                caller: currentFrame ? currentFrame.functionName : 'main()',
+                errorMessage: `Cannot access private member variable '${mName}' of class '${clsDef.name}'. Direct external access is forbidden.`
+              };
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `🚫 Access Violation: Attempted to access private member '${objName}.${mName}' directly from outside class. Blocked at boundary!`,
+                {
+                  classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                }
+              );
+              idx++;
+              continue;
+            }
+
+            if (isDirectProt) {
+              currentAccessViolation = {
+                attemptedMember: mName,
+                attemptedAccess: 'protected',
+                caller: currentFrame ? currentFrame.functionName : 'main()',
+                errorMessage: `Cannot access protected member variable '${mName}' of class '${clsDef.name}'. Protected members can only be accessed within the class or derived classes.`
+              };
+              recordStep(
+                cur.lineNum,
+                trimmed,
+                `🚫 Access Violation: Protected member variable '${mName}' cannot be accessed directly from external callers like main().`,
+                {
+                  classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                }
+              );
+              idx++;
+              continue;
+            }
+
+            if (isDirectPub) {
+              if (op) {
+                const oldVal = obj.memberValues[mName] ?? '0';
+                let newVal = evalExpressionWithCalls(expr, currentFrame);
+                if (op === '+=') newVal = String(parseFloat(oldVal) + parseFloat(newVal));
+                else if (op === '-=') newVal = String(parseFloat(oldVal) - parseFloat(newVal));
+                else if (op === '*=') newVal = String(parseFloat(oldVal) * parseFloat(newVal));
+                else if (op === '/=') newVal = String(parseFloat(oldVal) / (parseFloat(newVal) || 1));
+                else if (op === '%=') newVal = String(parseFloat(oldVal) % (parseFloat(newVal) || 1));
+
+                if (!obj.previousMemberValues) obj.previousMemberValues = {};
+                obj.previousMemberValues[mName] = oldVal;
+                obj.memberValues[mName] = newVal;
+                obj.isModifiedMember = mName;
+
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `Updated public member variable '${mName}' in object '${objName}' to ${newVal}. Value updated in variable bucket.`,
+                  {
+                    classContainer: makeClassSnapshot({
+                      highlightedCompartment: 'public',
+                      highlightedMember: mName
+                    })
+                  }
+                );
+                idx++;
+                continue;
               }
-            );
-            idx++;
-            continue;
+            }
+
+            // Not direct: check inherited variables!
+            const inherited = ProgramSimulator.resolveInheritance(obj.className, classDefs);
+            const inhVar = inherited.inheritedVariables.find(v => v.name === mName);
+
+            if (inhVar) {
+              if (inhVar.effectiveAccess === 'inaccessible') {
+                currentAccessViolation = {
+                  attemptedMember: mName,
+                  attemptedAccess: 'private',
+                  caller: currentFrame ? currentFrame.functionName : 'main()',
+                  errorMessage: `Cannot access private member variable '${mName}' of parent class '${inhVar.originalClassName}'. Private members are inaccessible to child class '${obj.className}'.`
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: Direct access to private parent variable '${mName}' on object '${objName}' is blocked!`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              if (inhVar.effectiveAccess === 'protected') {
+                currentAccessViolation = {
+                  attemptedMember: mName,
+                  attemptedAccess: 'protected',
+                  caller: currentFrame ? currentFrame.functionName : 'main()',
+                  errorMessage: `Cannot access protected member variable '${mName}' in object of type '${obj.className}'. Protected members cannot be accessed directly from external callers like main().`
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: Protected member variable '${mName}' cannot be accessed from outside class hierarchy!`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              if (inhVar.effectiveAccess === 'private') {
+                currentAccessViolation = {
+                  attemptedMember: mName,
+                  attemptedAccess: 'private',
+                  caller: currentFrame ? currentFrame.functionName : 'main()',
+                  errorMessage: `Cannot access member '${mName}' in object of type '${obj.className}'. Private inheritance restricts access to class '${obj.className}' only.`
+                };
+                recordStep(
+                  cur.lineNum,
+                  trimmed,
+                  `🚫 Access Violation: Private inheritance restricts access to '${mName}'!`,
+                  {
+                    classContainer: makeClassSnapshot({ accessViolation: currentAccessViolation })
+                  }
+                );
+                idx++;
+                continue;
+              }
+
+              if (inhVar.effectiveAccess === 'public') {
+                if (op) {
+                  const oldVal = obj.memberValues[mName] ?? '0';
+                  let newVal = evalExpressionWithCalls(expr, currentFrame);
+                  if (op === '+=') newVal = String(parseFloat(oldVal) + parseFloat(newVal));
+                  else if (op === '-=') newVal = String(parseFloat(oldVal) - parseFloat(newVal));
+                  else if (op === '*=') newVal = String(parseFloat(oldVal) * parseFloat(newVal));
+                  else if (op === '/=') newVal = String(parseFloat(oldVal) / (parseFloat(newVal) || 1));
+                  else if (op === '%=') newVal = String(parseFloat(oldVal) % (parseFloat(newVal) || 1));
+
+                  if (!obj.previousMemberValues) obj.previousMemberValues = {};
+                  obj.previousMemberValues[mName] = oldVal;
+                  obj.memberValues[mName] = newVal;
+                  obj.isModifiedMember = mName;
+
+                  recordStep(
+                    cur.lineNum,
+                    trimmed,
+                    `Updated inherited public member variable '${mName}' (declared in '${inhVar.originalClassName}') in object '${objName}' to ${newVal}.`,
+                    {
+                      classContainer: makeClassSnapshot({
+                        highlightedCompartment: 'public',
+                        highlightedMember: mName
+                      })
+                    }
+                  );
+                  idx++;
+                  continue;
+                }
+              }
+            }
           }
         }
 
@@ -2074,9 +2709,12 @@ export class ProgramSimulator {
     steps.forEach(s => (s.totalSteps = steps.length));
 
     const detectedKind: StructureKind = classDefs.size > 0 ? 'class' : (functionDefs.size > 0 ? 'workflow' : 'variables');
-    const structureTitle = classDefs.size > 0
-      ? `Class Blueprint & Objects (${Array.from(classDefs.keys())[0]})`
-      : (varOrder.length > 0 ? `Variables & State (${varOrder.length} Buckets)` : 'Program Execution');
+    const hasInheritance = Array.from(classDefs.values()).some(c => c.baseClasses && c.baseClasses.length > 0);
+    const structureTitle = hasInheritance
+      ? `C++ Inheritance Hierarchy (${Array.from(classDefs.keys()).join(', ')})`
+      : (classDefs.size > 0
+        ? `Class Blueprint & Objects (${Array.from(classDefs.keys())[0]})`
+        : (varOrder.length > 0 ? `Variables & State (${varOrder.length} Buckets)` : 'Program Execution'));
 
     return {
       steps,
@@ -2087,6 +2725,177 @@ export class ProgramSimulator {
 
   // --- Helper Methods ---
 
+  private static isSubclassOf(
+    childName: string,
+    parentName: string,
+    classDefs: Map<string, ClassDef>,
+    visited: Set<string> = new Set()
+  ): boolean {
+    if (childName === parentName) return true;
+    if (visited.has(childName)) return false;
+    visited.add(childName);
+    const cls = classDefs.get(childName);
+    if (!cls || !cls.baseClasses) return false;
+    for (const b of cls.baseClasses) {
+      if (b.baseClassName === parentName) return true;
+      if (this.isSubclassOf(b.baseClassName, parentName, classDefs, visited)) return true;
+    }
+    return false;
+  }
+
+  private static calculateHierarchyTiers(classDefs: Map<string, ClassDef>): Map<string, number> {
+    const tiers = new Map<string, number>();
+
+    const getTier = (name: string, visited: Set<string> = new Set()): number => {
+      if (tiers.has(name)) return tiers.get(name)!;
+      if (visited.has(name)) return 0;
+      visited.add(name);
+
+      const cls = classDefs.get(name);
+      if (!cls || !cls.baseClasses || cls.baseClasses.length === 0) {
+        tiers.set(name, 0);
+        return 0;
+      }
+
+      let maxBaseTier = 0;
+      cls.baseClasses.forEach(b => {
+        const bTier = getTier(b.baseClassName, new Set(visited));
+        if (bTier >= maxBaseTier) maxBaseTier = bTier + 1;
+      });
+
+      tiers.set(name, maxBaseTier);
+      return maxBaseTier;
+    };
+
+    classDefs.forEach((_, name) => getTier(name));
+    return tiers;
+  }
+
+  private static resolveInheritance(
+    className: string,
+    classDefs: Map<string, ClassDef>,
+    visited: Set<string> = new Set()
+  ): {
+    inheritedVariables: (ClassMemberVariable & { originalAccess: ClassAccessSpecifier; effectiveAccess: 'public' | 'protected' | 'private' | 'inaccessible'; originalClassName: string })[];
+    inheritedFunctions: {
+      name: string;
+      returnType: string;
+      originalAccess: ClassAccessSpecifier;
+      effectiveAccess: 'public' | 'protected' | 'private' | 'inaccessible';
+      originalClassName: string;
+      declaringClass: string;
+      params: { type: string; name: string }[];
+      startLine: number;
+      bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+    }[];
+  } {
+    const result = {
+      inheritedVariables: [] as (ClassMemberVariable & { originalAccess: ClassAccessSpecifier; effectiveAccess: 'public' | 'protected' | 'private' | 'inaccessible'; originalClassName: string })[],
+      inheritedFunctions: [] as any[]
+    };
+
+    if (visited.has(className)) return result;
+    visited.add(className);
+
+    const cls = classDefs.get(className);
+    if (!cls || !cls.baseClasses || cls.baseClasses.length === 0) return result;
+
+    const transformAccess = (
+      orig: 'public' | 'protected' | 'private' | 'inaccessible',
+      mode: InheritanceAccessMode
+    ): 'public' | 'protected' | 'private' | 'inaccessible' => {
+      if (orig === 'inaccessible' || orig === 'private') return 'inaccessible';
+      if (mode === 'public') return orig;
+      if (mode === 'protected') return 'protected';
+      if (mode === 'private') return 'private';
+      return 'inaccessible';
+    };
+
+    cls.baseClasses.forEach(base => {
+      const baseDef = classDefs.get(base.baseClassName);
+      if (!baseDef) return;
+
+      // 1. Recursive: members inherited by baseDef from its ancestors (multilevel inheritance)
+      const ancestorResolved = this.resolveInheritance(base.baseClassName, classDefs, new Set(visited));
+      ancestorResolved.inheritedVariables.forEach(v => {
+        const eff = transformAccess(v.effectiveAccess, base.accessMode);
+        result.inheritedVariables.push({
+          ...v,
+          effectiveAccess: eff
+        });
+      });
+      ancestorResolved.inheritedFunctions.forEach(f => {
+        const eff = transformAccess(f.effectiveAccess, base.accessMode);
+        result.inheritedFunctions.push({
+          ...f,
+          effectiveAccess: eff
+        });
+      });
+
+      // 2. Direct members of baseDef
+      // Public vars
+      baseDef.publicVariables.forEach(v => {
+        result.inheritedVariables.push({
+          ...v,
+          originalAccess: 'public',
+          effectiveAccess: transformAccess('public', base.accessMode),
+          originalClassName: baseDef.name
+        });
+      });
+      // Protected vars
+      baseDef.protectedVariables.forEach(v => {
+        result.inheritedVariables.push({
+          ...v,
+          originalAccess: 'protected',
+          effectiveAccess: transformAccess('protected', base.accessMode),
+          originalClassName: baseDef.name
+        });
+      });
+      // Private vars (inaccessible directly)
+      baseDef.privateVariables.forEach(v => {
+        result.inheritedVariables.push({
+          ...v,
+          originalAccess: 'private',
+          effectiveAccess: 'inaccessible',
+          originalClassName: baseDef.name
+        });
+      });
+
+      // Public funcs
+      baseDef.publicFunctions.forEach(f => {
+        result.inheritedFunctions.push({
+          ...f,
+          originalAccess: 'public',
+          effectiveAccess: transformAccess('public', base.accessMode),
+          originalClassName: baseDef.name,
+          declaringClass: baseDef.name
+        });
+      });
+      // Protected funcs
+      baseDef.protectedFunctions.forEach(f => {
+        result.inheritedFunctions.push({
+          ...f,
+          originalAccess: 'protected',
+          effectiveAccess: transformAccess('protected', base.accessMode),
+          originalClassName: baseDef.name,
+          declaringClass: baseDef.name
+        });
+      });
+      // Private funcs
+      baseDef.privateFunctions.forEach(f => {
+        result.inheritedFunctions.push({
+          ...f,
+          originalAccess: 'private',
+          effectiveAccess: 'inaccessible',
+          originalClassName: baseDef.name,
+          declaringClass: baseDef.name
+        });
+      });
+    });
+
+    return result;
+  }
+
   private static extractClasses(
     lines: { lineNum: number; raw: string; clean?: string; trimmed: string }[]
   ): Map<string, ClassDef> {
@@ -2094,16 +2903,33 @@ export class ProgramSimulator {
     let i = 0;
     while (i < lines.length) {
       const line = lines[i].trimmed;
-      const classMatch = line.match(/^class\s+([a-zA-Z_]\w*)/);
+      const classMatch = line.match(/^class\s+([a-zA-Z_]\w*)(?:\s*:\s*([^{;]+))?/);
       if (classMatch) {
         const className = classMatch[1];
         const classStartLine = lines[i].lineNum;
+        const baseClasses: BaseClassInheritance[] = [];
+
+        if (classMatch[2]) {
+          const rawBases = classMatch[2].split(',');
+          for (const rawB of rawBases) {
+            const bTrim = rawB.trim();
+            const bMatch = bTrim.match(/^(?:(public|protected|private)\s+)?([a-zA-Z_]\w*)$/);
+            if (bMatch) {
+              const accessMode = (bMatch[1] as InheritanceAccessMode) || 'private';
+              const baseName = bMatch[2];
+              baseClasses.push({ baseClassName: baseName, accessMode });
+            }
+          }
+        }
+
         const { bodyLines, endLineIdx } = this.extractBlockBody(lines, i);
 
-        let currentAccess: 'private' | 'public' = 'private'; // default in C++ class
+        let currentAccess: ClassAccessSpecifier = 'private'; // default in C++ class
         const privateVariables: ClassMemberVariable[] = [];
+        const protectedVariables: ClassMemberVariable[] = [];
         const publicVariables: ClassMemberVariable[] = [];
         const privateFunctions: ClassDef['privateFunctions'] = [];
+        const protectedFunctions: ClassDef['protectedFunctions'] = [];
         const publicFunctions: ClassDef['publicFunctions'] = [];
 
         let bi = 0;
@@ -2116,6 +2942,11 @@ export class ProgramSimulator {
 
           if (bLine.match(/^private\s*:/)) {
             currentAccess = 'private';
+            bi++;
+            continue;
+          }
+          if (bLine.match(/^protected\s*:/)) {
+            currentAccess = 'protected';
             bi++;
             continue;
           }
@@ -2150,13 +2981,16 @@ export class ProgramSimulator {
               access: currentAccess,
               params,
               startLine: funcStartLine,
-              bodyLines: extracted.bodyLines
+              bodyLines: extracted.bodyLines,
+              declaringClass: className
             };
 
             if (currentAccess === 'private') {
-              privateFunctions.push(memberFunc);
+              privateFunctions.push(memberFunc as ClassDef['privateFunctions'][0]);
+            } else if (currentAccess === 'protected') {
+              protectedFunctions.push(memberFunc as ClassDef['protectedFunctions'][0]);
             } else {
-              publicFunctions.push(memberFunc);
+              publicFunctions.push(memberFunc as ClassDef['publicFunctions'][0]);
             }
             bi = extracted.endLineIdx + 1;
             continue;
@@ -2172,11 +3006,14 @@ export class ProgramSimulator {
               name: varName,
               type: varType,
               access: currentAccess,
-              defaultValue: defVal
+              defaultValue: defVal,
+              declaringClass: className
             };
 
             if (currentAccess === 'private') {
               privateVariables.push(memberVar);
+            } else if (currentAccess === 'protected') {
+              protectedVariables.push(memberVar);
             } else {
               publicVariables.push(memberVar);
             }
@@ -2190,9 +3027,12 @@ export class ProgramSimulator {
         map.set(className, {
           name: className,
           startLine: classStartLine,
+          baseClasses,
           privateVariables,
+          protectedVariables,
           publicVariables,
           privateFunctions,
+          protectedFunctions,
           publicFunctions
         });
 

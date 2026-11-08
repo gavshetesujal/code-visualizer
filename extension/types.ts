@@ -183,19 +183,68 @@ export interface ArrayMemoryStructure {
   cells: ArrayMemoryCell[];
 }
 
+export type ClassAccessSpecifier = 'private' | 'protected' | 'public';
+export type InheritanceAccessMode = 'public' | 'protected' | 'private';
+
+export interface BaseClassInheritance {
+  baseClassName: string;
+  accessMode: InheritanceAccessMode;
+}
+
 export interface ClassMemberVariable {
   name: string;
   type: string;
-  access: 'private' | 'public';
+  access: ClassAccessSpecifier;
   defaultValue?: string;
+  declaringClass?: string;
 }
 
 export interface ClassMemberFunction {
   name: string;
   returnType: string;
-  access: 'private' | 'public';
+  access: ClassAccessSpecifier;
   params: { type: string; name: string }[];
   startLine: number;
+  declaringClass?: string;
+}
+
+export interface InheritedMemberInfo {
+  name: string;
+  originalClassName: string;
+  originalAccess: ClassAccessSpecifier;
+  effectiveAccess: 'private' | 'protected' | 'public' | 'inaccessible';
+  kind: 'variable' | 'function';
+  typeOrReturnType: string;
+  signature?: string;
+  value?: string;
+  previousValue?: string;
+  isModified?: boolean;
+  isActive?: boolean;
+}
+
+export interface InheritanceRelationship {
+  childClassName: string;
+  parentClassName: string;
+  accessMode: InheritanceAccessMode;
+  isActive?: boolean;
+  statusLabel?: string;
+}
+
+export interface SingleClassViewState {
+  className: string;
+  isParent?: boolean;
+  isChild?: boolean;
+  baseClasses?: BaseClassInheritance[];
+  hierarchyTier?: number;
+  privateVariables: VariableBucket[];
+  protectedVariables: VariableBucket[];
+  publicVariables: VariableBucket[];
+  privateFunctions: { name: string; signature: string; isActive?: boolean }[];
+  protectedFunctions: { name: string; signature: string; isActive?: boolean }[];
+  publicFunctions: { name: string; signature: string; isActive?: boolean }[];
+  inheritedMembers?: InheritedMemberInfo[];
+  highlightedCompartment?: 'private' | 'protected' | 'public' | 'none';
+  highlightedMember?: string;
 }
 
 export interface ClassObjectInstance {
@@ -207,11 +256,19 @@ export interface ClassObjectInstance {
 }
 
 export interface ClassPathwayArrow {
-  type: 'external-to-public' | 'public-to-private' | 'return-to-public' | 'return-to-caller';
+  type:
+    | 'external-to-public'
+    | 'public-to-private'
+    | 'return-to-public'
+    | 'return-to-caller'
+    | 'child-to-parent'
+    | 'parent-to-child'
+    | 'return-to-child';
   fromLabel: string;
   toLabel: string;
-  targetCompartment: 'public' | 'private';
+  targetCompartment?: 'public' | 'protected' | 'private';
   targetMember?: string;
+  targetClass?: string;
   status: 'animating' | 'active' | 'completed';
 }
 
@@ -219,16 +276,21 @@ export interface ClassContainerState {
   className: string;
   activeObjectName?: string;
   objects: ClassObjectInstance[];
-  highlightedCompartment?: 'private' | 'public' | 'none';
+  highlightedCompartment?: 'private' | 'protected' | 'public' | 'none';
   highlightedMember?: string;
   activePathway?: ClassPathwayArrow;
   privateVariables: VariableBucket[];
+  protectedVariables?: VariableBucket[];
   publicVariables: VariableBucket[];
   privateFunctions: { name: string; signature: string; isActive?: boolean }[];
+  protectedFunctions?: { name: string; signature: string; isActive?: boolean }[];
   publicFunctions: { name: string; signature: string; isActive?: boolean }[];
+  classes?: SingleClassViewState[];
+  inheritanceRelationships?: InheritanceRelationship[];
+  inheritedMembers?: InheritedMemberInfo[];
   accessViolation?: {
     attemptedMember: string;
-    attemptedAccess: 'private';
+    attemptedAccess: 'private' | 'protected';
     caller: string;
     errorMessage: string;
   };

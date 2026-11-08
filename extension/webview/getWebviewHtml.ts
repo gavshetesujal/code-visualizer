@@ -1813,6 +1813,154 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       align-items: center;
       gap: 6px;
     }
+
+    /* INHERITANCE VISUALIZATION STYLES */
+    .inheritance-hierarchy-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      width: 100%;
+      max-width: 960px;
+      margin-bottom: 24px;
+    }
+
+    .hierarchy-tier-row {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 28px;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+
+    .inheritance-connector-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 4px 0;
+    }
+
+    .inheritance-arrow-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 18px;
+      border-radius: 20px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1.5px solid #8b5cf6;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: #c4b5fd;
+      letter-spacing: 0.5px;
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.3);
+      transition: all 0.3s ease;
+    }
+
+    .inheritance-arrow-badge.is-active-connector {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.2);
+      color: #ffffff;
+      box-shadow: 0 0 25px rgba(56, 189, 248, 0.7);
+      transform: scale(1.05);
+      animation: connectorPulse 1.2s infinite;
+    }
+
+    @keyframes connectorPulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.5); }
+      50% { box-shadow: 0 0 35px rgba(56, 189, 248, 0.9); }
+    }
+
+    .class-role-badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .class-role-badge.parent {
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(139, 92, 246, 0.5);
+      color: #c4b5fd;
+    }
+
+    .class-role-badge.child {
+      background: rgba(56, 189, 248, 0.2);
+      border: 1px solid rgba(56, 189, 248, 0.5);
+      color: #38bdf8;
+    }
+
+    /* PROTECTED COMPARTMENT */
+    .compartment-protected {
+      background: rgba(245, 158, 11, 0.03);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      position: relative;
+      transition: all 0.3s ease;
+      border-top: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .compartment-protected.is-active-compartment {
+      background: rgba(245, 158, 11, 0.08);
+    }
+
+    .badge-protected {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+
+    .func-access-pill.protected {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .func-access-pill.inaccessible {
+      background: rgba(100, 116, 139, 0.2);
+      color: #94a3b8;
+      border: 1px solid rgba(100, 116, 139, 0.4);
+      text-decoration: line-through;
+    }
+
+    /* INHERITED MEMBERS SECTION (INSIDE CHILD CLASS) */
+    .inherited-members-section {
+      background: rgba(30, 41, 59, 0.35);
+      border-top: 1.5px dashed rgba(139, 92, 246, 0.35);
+      padding: 16px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .inherited-members-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: #a78bfa;
+    }
+
+    .origin-tag {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(139, 92, 246, 0.25);
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      color: #c4b5fd;
+      margin-left: 6px;
+    }
   </style>
 </head>
 <body>
@@ -2256,6 +2404,15 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
           } else if (p.type === 'return-to-caller') {
             iconText = '⬅ OPENING A';
             pathwayText = \`Exit Transition: '\${p.fromLabel}' finishes, exiting through Opening A back to caller '\${p.toLabel}'.\`;
+          } else if (p.type === 'child-to-parent') {
+            iconText = '▲ INHERITANCE';
+            pathwayText = \`Inheritance Dispatch: Call to '\${p.fromLabel}()' delegates along inheritance path up to '\${p.targetClass || 'Base'}::\${p.toLabel}()'.\`;
+          } else if (p.type === 'parent-to-child') {
+            iconText = '▼ PARENT TO CHILD';
+            pathwayText = \`Inherited Execution: '\${p.fromLabel}' accessing object '\${cls.activeObjectName || 'instance'}' derived state.\`;
+          } else if (p.type === 'return-to-child') {
+            iconText = '▼ INHERITANCE RETURN';
+            pathwayText = \`Inherited Method Finished: '\${p.fromLabel}()' returns along inheritance path back to derived class '\${p.toLabel}'.\`;
           }
 
           bannerEl.innerHTML = \`
@@ -2265,190 +2422,409 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
           classRoot.appendChild(bannerEl);
         }
 
-        const isGatewayBActive = cls.activePathway && (cls.activePathway.type === 'public-to-private' || cls.activePathway.type === 'return-to-public');
-        const isEntranceAActive = cls.activePathway && (cls.activePathway.type === 'external-to-public' || cls.activePathway.type === 'return-to-caller');
+        const createClassBox = (view, isRootMultiView) => {
+          const isCurrentClassActive = (cls.activePathway && cls.activePathway.targetClass === view.className) || (view.className === cls.className);
+          const isGatewayBActive = isCurrentClassActive && cls.activePathway && (cls.activePathway.type === 'public-to-private' || cls.activePathway.type === 'return-to-public');
+          const isEntranceAActive = isCurrentClassActive && cls.activePathway && (cls.activePathway.type === 'external-to-public' || cls.activePathway.type === 'return-to-caller');
 
-        const boxEl = document.createElement('div');
-        boxEl.className = 'class-blueprint-box' + (cls.accessViolation ? ' is-violation' : '');
+          const boxEl = document.createElement('div');
+          boxEl.className = 'class-blueprint-box' + (cls.accessViolation && (cls.accessViolation.caller === view.className || cls.className === view.className) ? ' is-violation' : '');
+          if (isRootMultiView) {
+            boxEl.style.minWidth = '320px';
+            boxEl.style.maxWidth = '460px';
+            boxEl.style.flex = '1 1 340px';
+          }
 
-        // Header Bar
-        let instancesHtml = '';
-        if (cls.objects && cls.objects.length > 0) {
-          instancesHtml = \`
-            <div class="class-instances-bar">
-              <span style="font-size:11px; color:#64748b; font-weight:700; font-family:var(--font-mono);">OBJECTS:</span>
-              \${cls.objects.map(obj => \`
-                <span class="class-instance-chip \${obj.objectName === cls.activeObjectName ? 'is-active' : ''}">
-                  <span style="width:6px; height:6px; border-radius:50%; background:\${obj.objectName === cls.activeObjectName ? '#38bdf8' : '#64748b'};"></span>
-                  <span>\${obj.objectName}</span>
-                  \${obj.objectName === cls.activeObjectName ? '<span style="font-size:9px; opacity:0.8;">(active)</span>' : ''}
-                </span>
-              \`).join('')}
+          // Header Bar
+          let instancesHtml = '';
+          if (cls.objects && cls.objects.length > 0) {
+            const applicableObjs = cls.objects.filter(o => o.className === view.className);
+            if (applicableObjs.length > 0) {
+              instancesHtml = \`
+                <div class="class-instances-bar">
+                  <span style="font-size:11px; color:#64748b; font-weight:700; font-family:var(--font-mono);">OBJECTS:</span>
+                  \${applicableObjs.map(obj => \`
+                    <span class="class-instance-chip \${obj.objectName === cls.activeObjectName ? 'is-active' : ''}">
+                      <span style="width:6px; height:6px; border-radius:50%; background:\${obj.objectName === cls.activeObjectName ? '#38bdf8' : '#64748b'};"></span>
+                      <span>\${obj.objectName}</span>
+                      \${obj.objectName === cls.activeObjectName ? '<span style="font-size:9px; opacity:0.8;">(active)</span>' : ''}
+                    </span>
+                  \`).join('')}
+                </div>
+              \`;
+            }
+          }
+
+          let roleBadgeHtml = '';
+          if (view.isParent) {
+            roleBadgeHtml += '<span class="class-role-badge parent">PARENT CLASS</span>';
+          }
+          if (view.isChild) {
+            roleBadgeHtml += '<span class="class-role-badge child">CHILD CLASS</span>';
+          }
+
+          let modeBadgeHtml = '';
+          if (view.highlightedCompartment === 'private') {
+            modeBadgeHtml = '<span class="compartment-badge badge-private">● ACTIVE: PRIVATE</span>';
+          } else if (view.highlightedCompartment === 'protected') {
+            modeBadgeHtml = '<span class="compartment-badge badge-protected">● ACTIVE: PROTECTED</span>';
+          } else if (view.highlightedCompartment === 'public') {
+            modeBadgeHtml = '<span class="compartment-badge badge-public">● ACTIVE: PUBLIC</span>';
+          } else {
+            modeBadgeHtml = '<span style="color:#64748b; font-size:11px; font-family:var(--font-mono); font-weight:600;">ACCESS: IDLE</span>';
+          }
+
+          let baseClsChips = '';
+          if (view.baseClasses && view.baseClasses.length > 0) {
+            baseClsChips = \`
+              <div style="font-size:11px; color:#94a3b8; font-family:var(--font-mono); margin-left:4px;">
+                : \${view.baseClasses.map(b => \`<span style="color:#a78bfa; font-weight:700;">\${b.accessMode} \${b.baseClassName}</span>\`).join(', ')}
+              </div>
+            \`;
+          }
+
+          boxEl.innerHTML = \`
+            <div class="class-header-bar">
+              <div class="class-identity-badge">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                <span>CLASS: <strong>\${view.className}</strong></span>
+                \${baseClsChips}
+                \${roleBadgeHtml}
+              </div>
+              \${instancesHtml}
+              <div>\${modeBadgeHtml}</div>
             </div>
           \`;
-        }
 
-        let modeBadgeHtml = '';
-        if (cls.highlightedCompartment === 'private') {
-          modeBadgeHtml = '<span class="compartment-badge badge-private">● ACTIVE: PRIVATE</span>';
-        } else if (cls.highlightedCompartment === 'public') {
-          modeBadgeHtml = '<span class="compartment-badge badge-public">● ACTIVE: PUBLIC</span>';
+          // UPPER COMPARTMENT: PRIVATE
+          const privEl = document.createElement('div');
+          privEl.className = 'compartment-private' + (view.highlightedCompartment === 'private' ? ' is-active-compartment' : '');
+
+          let privBucketsHtml = '';
+          if (view.privateVariables && view.privateVariables.length > 0) {
+            privBucketsHtml = \`
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <div class="member-funcs-title">Private Member Variables:</div>
+                <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
+                  \${view.privateVariables.map(b => {
+                    const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
+                    return \`
+                      <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
+                        <span class="bucket-name-tag">\${b.name}</span>
+                        <div class="bucket-value-container">
+                          \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
+                          <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
+                        </div>
+                      </div>
+                    \`;
+                  }).join('')}
+                </div>
+              </div>
+            \`;
+          }
+
+          let privFuncsHtml = '';
+          if (view.privateFunctions && view.privateFunctions.length > 0) {
+            privFuncsHtml = \`
+              <div class="member-funcs-section">
+                <div class="member-funcs-title">Private Member Functions:</div>
+                <div class="member-funcs-grid">
+                  \${view.privateFunctions.map(f => \`
+                    <div class="class-func-card \${f.name === view.highlightedMember ? 'is-active-func' : ''}">
+                      <span class="func-access-pill private">private</span>
+                      <span><strong>\${f.signature}</strong></span>
+                    </div>
+                  \`).join('')}
+                </div>
+              </div>
+            \`;
+          }
+
+          privEl.innerHTML = \`
+            <div class="compartment-header">
+              <div class="compartment-badge badge-private">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                <span>PRIVATE COMPARTMENT</span>
+              </div>
+              <span class="compartment-access-rule">🔒 Internal class access only (Direct external access forbidden)</span>
+            </div>
+            \${privBucketsHtml}
+            \${privFuncsHtml}
+          \`;
+          boxEl.appendChild(privEl);
+
+          // MIDDLE COMPARTMENT: PROTECTED (if any protected members exist in this class)
+          if ((view.protectedVariables && view.protectedVariables.length > 0) || (view.protectedFunctions && view.protectedFunctions.length > 0)) {
+            const protEl = document.createElement('div');
+            protEl.className = 'compartment-protected' + (view.highlightedCompartment === 'protected' ? ' is-active-compartment' : '');
+
+            let protBucketsHtml = '';
+            if (view.protectedVariables && view.protectedVariables.length > 0) {
+              protBucketsHtml = \`
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <div class="member-funcs-title">Protected Member Variables:</div>
+                  <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
+                    \${view.protectedVariables.map(b => {
+                      const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
+                      return \`
+                        <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
+                          <span class="bucket-name-tag">\${b.name}</span>
+                          <div class="bucket-value-container">
+                            \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
+                            <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
+                          </div>
+                        </div>
+                      \`;
+                    }).join('')}
+                  </div>
+                </div>
+              \`;
+            }
+
+            let protFuncsHtml = '';
+            if (view.protectedFunctions && view.protectedFunctions.length > 0) {
+              protFuncsHtml = \`
+                <div class="member-funcs-section">
+                  <div class="member-funcs-title">Protected Member Functions:</div>
+                  <div class="member-funcs-grid">
+                    \${view.protectedFunctions.map(f => \`
+                      <div class="class-func-card \${f.name === view.highlightedMember ? 'is-active-func' : ''}">
+                        <span class="func-access-pill protected">protected</span>
+                        <span><strong>\${f.signature}</strong></span>
+                      </div>
+                    \`).join('')}
+                  </div>
+                </div>
+              \`;
+            }
+
+            protEl.innerHTML = \`
+              <div class="compartment-header">
+                <div class="compartment-badge badge-protected">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                  <span>PROTECTED COMPARTMENT</span>
+                </div>
+                <span class="compartment-access-rule">🛡️ Accessible by this class and derived classes only</span>
+              </div>
+              \${protBucketsHtml}
+              \${protFuncsHtml}
+            \`;
+            boxEl.appendChild(protEl);
+          }
+
+          // DIVIDER WITH OPENING B
+          const dividerEl = document.createElement('div');
+          dividerEl.className = 'divider-opening-b-wrap';
+          dividerEl.innerHTML = \`
+            <div class="divider-left-line"></div>
+            <div class="opening-b-gateway \${isGatewayBActive ? 'is-active-gateway' : ''}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"></polyline></svg>
+              <span>OPENING B: Internal Divider Gateway</span>
+            </div>
+            <div class="divider-right-line"></div>
+          \`;
+          boxEl.appendChild(dividerEl);
+
+          // LOWER COMPARTMENT: PUBLIC WITH OPENING A
+          const pubWrap = document.createElement('div');
+          pubWrap.className = 'compartment-public-wrap';
+
+          // Opening A Notch on left wall
+          const notchA = document.createElement('div');
+          notchA.className = 'opening-a-notch' + (isEntranceAActive ? ' is-active-entrance' : '');
+          notchA.innerHTML = \`
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            <span>OPENING A (Public Entrance)</span>
+          \`;
+          pubWrap.appendChild(notchA);
+
+          const pubEl = document.createElement('div');
+          pubEl.className = 'compartment-public' + (view.highlightedCompartment === 'public' ? ' is-active-compartment' : '');
+
+          let pubBucketsHtml = '';
+          if (view.publicVariables && view.publicVariables.length > 0) {
+            pubBucketsHtml = \`
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <div class="member-funcs-title">Public Member Variables:</div>
+                <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
+                  \${view.publicVariables.map(b => {
+                    const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
+                    return \`
+                      <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
+                        <span class="bucket-name-tag">\${b.name}</span>
+                        <div class="bucket-value-container">
+                          \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
+                          <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
+                        </div>
+                      </div>
+                    \`;
+                  }).join('')}
+                </div>
+              </div>
+            \`;
+          }
+
+          let pubFuncsHtml = '';
+          if (view.publicFunctions && view.publicFunctions.length > 0) {
+            pubFuncsHtml = \`
+              <div class="member-funcs-section">
+                <div class="member-funcs-title">Public Member Functions:</div>
+                <div class="member-funcs-grid">
+                  \${view.publicFunctions.map(f => \`
+                    <div class="class-func-card \${f.name === view.highlightedMember ? 'is-active-func' : ''}">
+                      <span class="func-access-pill public">public</span>
+                      <span><strong>\${f.signature}</strong></span>
+                    </div>
+                  \`).join('')}
+                </div>
+              </div>
+            \`;
+          }
+
+          pubEl.innerHTML = \`
+            <div class="compartment-header">
+              <div class="compartment-badge badge-public">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+                <span>PUBLIC COMPARTMENT</span>
+              </div>
+              <span class="compartment-access-rule">🔓 External calls enter via Opening A</span>
+            </div>
+            \${pubBucketsHtml}
+            \${pubFuncsHtml}
+          \`;
+          pubWrap.appendChild(pubEl);
+          boxEl.appendChild(pubWrap);
+
+          // INHERITED MEMBERS SECTION (if any inherited members)
+          if (view.inheritedMembers && view.inheritedMembers.length > 0) {
+            const inhEl = document.createElement('div');
+            inhEl.className = 'inherited-members-section';
+
+            const inhVars = view.inheritedMembers.filter(m => m.kind === 'variable');
+            const inhFuncs = view.inheritedMembers.filter(m => m.kind === 'function');
+
+            let inhVarsHtml = '';
+            if (inhVars.length > 0) {
+              inhVarsHtml = \`
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <div class="member-funcs-title">Inherited Member Variables:</div>
+                  <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
+                    \${inhVars.map(iv => {
+                      const hasPrev = (iv.previousValue !== undefined && iv.previousValue !== iv.value && iv.previousValue !== '');
+                      return \`
+                        <div class="var-bucket \${iv.isModified ? 'is-modified' : ''}">
+                          <div style="display:flex; align-items:center; justify-content:center; gap:2px;">
+                            <span class="bucket-name-tag">\${iv.name}</span>
+                            <span class="origin-tag">from \${iv.originalClassName}</span>
+                          </div>
+                          <div class="bucket-value-container">
+                            \${hasPrev ? \`<div class="value-exit">\${iv.previousValue}</div>\` : ''}
+                            <div class="bucket-current-val \${iv.isModified ? 'value-enter' : ''}">\${iv.value ?? '0'}</div>
+                          </div>
+                          <div style="font-size:9px; color:#94a3b8; font-family:var(--font-mono); margin-top:2px;">effective: \${iv.effectiveAccess}</div>
+                        </div>
+                      \`;
+                    }).join('')}
+                  </div>
+                </div>
+              \`;
+            }
+
+            let inhFuncsHtml = '';
+            if (inhFuncs.length > 0) {
+              inhFuncsHtml = \`
+                <div class="member-funcs-section">
+                  <div class="member-funcs-title">Inherited Member Functions:</div>
+                  <div class="member-funcs-grid">
+                    \${inhFuncs.map(ifn => \`
+                      <div class="class-func-card \${ifn.isActive ? 'is-active-func' : ''}">
+                        <span class="func-access-pill \${ifn.effectiveAccess}">\${ifn.effectiveAccess}</span>
+                        <span><strong>\${ifn.signature}</strong></span>
+                        <span class="origin-tag">from \${ifn.originalClassName}</span>
+                      </div>
+                    \`).join('')}
+                  </div>
+                </div>
+              \`;
+            }
+
+            inhEl.innerHTML = \`
+              <div class="inherited-members-header">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 11 12 6 7 11"></polyline><polyline points="17 18 12 13 7 18"></polyline></svg>
+                <span>INHERITED MEMBERS (From Ancestor Classes)</span>
+              </div>
+              \${inhVarsHtml}
+              \${inhFuncsHtml}
+            \`;
+            boxEl.appendChild(inhEl);
+          }
+
+          return boxEl;
+        };
+
+        if (cls.classes && cls.classes.length > 1) {
+          const hierarchyView = document.createElement('div');
+          hierarchyView.className = 'inheritance-hierarchy-view';
+
+          // Group classes by hierarchy tier (Tier 0 = root parents at top, Tier 1 = derived, Tier 2 = grandchildren)
+          const tierMap = new Map();
+          cls.classes.forEach(c => {
+            const tier = c.hierarchyTier || 0;
+            if (!tierMap.has(tier)) tierMap.set(tier, []);
+            tierMap.get(tier).push(c);
+          });
+
+          const sortedTiers = Array.from(tierMap.keys()).sort((a, b) => a - b);
+
+          sortedTiers.forEach((tier, tIdx) => {
+            // Render connector arrow pointing from child (lower tier) to parent (upper tier)
+            if (tIdx > 0) {
+              const rels = cls.inheritanceRelationships || [];
+              const connectorEl = document.createElement('div');
+              connectorEl.className = 'inheritance-connector-block';
+
+              const activeRel = rels.find(r => r.isActive);
+              const isConnectorActive = Boolean(activeRel) || Boolean(cls.activePathway && (cls.activePathway.type === 'child-to-parent' || cls.activePathway.type === 'return-to-child'));
+
+              const relLabel = activeRel
+                ? \`▲ INHERITS FROM: \${activeRel.childClassName} ➔ \${activeRel.parentClassName} (\${activeRel.accessMode}) ▲\`
+                : (rels.length > 0 ? \`▲ INHERITANCE: \${rels.map(r => \`\${r.childClassName} : \${r.accessMode} \${r.parentClassName}\`).join(', ')} ▲\` : '▲ INHERITS FROM BASE CLASS ▲');
+
+              connectorEl.innerHTML = \`
+                <div class="inheritance-arrow-badge \${isConnectorActive ? 'is-active-connector' : ''}">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                  <span>\${relLabel}</span>
+                </div>
+              \`;
+              hierarchyView.appendChild(connectorEl);
+            }
+
+            const tierRow = document.createElement('div');
+            tierRow.className = 'hierarchy-tier-row';
+            const tierClasses = tierMap.get(tier);
+            tierClasses.forEach(cView => {
+              tierRow.appendChild(createClassBox(cView, true));
+            });
+            hierarchyView.appendChild(tierRow);
+          });
+
+          classRoot.appendChild(hierarchyView);
         } else {
-          modeBadgeHtml = '<span style="color:#64748b; font-size:11px; font-family:var(--font-mono); font-weight:600;">ACCESS: IDLE</span>';
+          // Single class fallback
+          const defaultView = (cls.classes && cls.classes[0]) || {
+            className: cls.className,
+            privateVariables: cls.privateVariables,
+            protectedVariables: cls.protectedVariables || [],
+            publicVariables: cls.publicVariables,
+            privateFunctions: cls.privateFunctions,
+            protectedFunctions: cls.protectedFunctions || [],
+            publicFunctions: cls.publicFunctions,
+            inheritedMembers: cls.inheritedMembers,
+            highlightedCompartment: cls.highlightedCompartment,
+            highlightedMember: cls.highlightedMember
+          };
+          classRoot.appendChild(createClassBox(defaultView, false));
         }
-
-        boxEl.innerHTML = \`
-          <div class="class-header-bar">
-            <div class="class-identity-badge">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
-              <span>CLASS: <strong>\${cls.className}</strong></span>
-            </div>
-            \${instancesHtml}
-            <div>\${modeBadgeHtml}</div>
-          </div>
-        \`;
-
-        // UPPER COMPARTMENT: PRIVATE
-        const privEl = document.createElement('div');
-        privEl.className = 'compartment-private' + (cls.highlightedCompartment === 'private' ? ' is-active-compartment' : '');
-
-        let privBucketsHtml = '';
-        if (cls.privateVariables && cls.privateVariables.length > 0) {
-          privBucketsHtml = \`
-            <div style="display:flex; flex-direction:column; gap:6px;">
-              <div class="member-funcs-title">Private Member Variables:</div>
-              <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
-                \${cls.privateVariables.map(b => {
-                  const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
-                  return \`
-                    <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
-                      <span class="bucket-name-tag">\${b.name}</span>
-                      <div class="bucket-value-container">
-                        \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
-                        <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
-                      </div>
-                    </div>
-                  \`;
-                }).join('')}
-              </div>
-            </div>
-          \`;
-        }
-
-        let privFuncsHtml = '';
-        if (cls.privateFunctions && cls.privateFunctions.length > 0) {
-          privFuncsHtml = \`
-            <div class="member-funcs-section">
-              <div class="member-funcs-title">Private Member Functions:</div>
-              <div class="member-funcs-grid">
-                \${cls.privateFunctions.map(f => \`
-                  <div class="class-func-card \${f.name === cls.highlightedMember ? 'is-active-func' : ''}">
-                    <span class="func-access-pill private">private</span>
-                    <span><strong>\${f.signature}</strong></span>
-                  </div>
-                \`).join('')}
-              </div>
-            </div>
-          \`;
-        }
-
-        privEl.innerHTML = \`
-          <div class="compartment-header">
-            <div class="compartment-badge badge-private">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-              <span>PRIVATE COMPARTMENT</span>
-            </div>
-            <span class="compartment-access-rule">🔒 Internal class access only (Direct external access forbidden)</span>
-          </div>
-          \${privBucketsHtml}
-          \${privFuncsHtml}
-        \`;
-        boxEl.appendChild(privEl);
-
-        // DIVIDER WITH OPENING B
-        const dividerEl = document.createElement('div');
-        dividerEl.className = 'divider-opening-b-wrap';
-        dividerEl.innerHTML = \`
-          <div class="divider-left-line"></div>
-          <div class="opening-b-gateway \${isGatewayBActive ? 'is-active-gateway' : ''}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"></polyline></svg>
-            <span>OPENING B: Internal Divider Gateway</span>
-          </div>
-          <div class="divider-right-line"></div>
-        \`;
-        boxEl.appendChild(dividerEl);
-
-        // LOWER COMPARTMENT: PUBLIC WITH OPENING A
-        const pubWrap = document.createElement('div');
-        pubWrap.className = 'compartment-public-wrap';
-
-        // Opening A Notch on left wall
-        const notchA = document.createElement('div');
-        notchA.className = 'opening-a-notch' + (isEntranceAActive ? ' is-active-entrance' : '');
-        notchA.innerHTML = \`
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
-          <span>OPENING A (Public Entrance)</span>
-        \`;
-        pubWrap.appendChild(notchA);
-
-        const pubEl = document.createElement('div');
-        pubEl.className = 'compartment-public' + (cls.highlightedCompartment === 'public' ? ' is-active-compartment' : '');
-
-        let pubBucketsHtml = '';
-        if (cls.publicVariables && cls.publicVariables.length > 0) {
-          pubBucketsHtml = \`
-            <div style="display:flex; flex-direction:column; gap:6px;">
-              <div class="member-funcs-title">Public Member Variables:</div>
-              <div class="buckets-grid" style="padding:4px 0; justify-content:flex-start;">
-                \${cls.publicVariables.map(b => {
-                  const hasPrev = (b.previousValue !== undefined && b.previousValue !== b.value && b.previousValue !== '');
-                  return \`
-                    <div class="var-bucket \${b.isModified ? 'is-modified' : ''}">
-                      <span class="bucket-name-tag">\${b.name}</span>
-                      <div class="bucket-value-container">
-                        \${hasPrev ? \`<div class="value-exit">\${b.previousValue}</div>\` : ''}
-                        <div class="bucket-current-val \${b.isModified ? 'value-enter' : ''}">\${b.value}</div>
-                      </div>
-                    </div>
-                  \`;
-                }).join('')}
-              </div>
-            </div>
-          \`;
-        }
-
-        let pubFuncsHtml = '';
-        if (cls.publicFunctions && cls.publicFunctions.length > 0) {
-          pubFuncsHtml = \`
-            <div class="member-funcs-section">
-              <div class="member-funcs-title">Public Member Functions:</div>
-              <div class="member-funcs-grid">
-                \${cls.publicFunctions.map(f => \`
-                  <div class="class-func-card \${f.name === cls.highlightedMember ? 'is-active-func' : ''}">
-                    <span class="func-access-pill public">public</span>
-                    <span><strong>\${f.signature}</strong></span>
-                  </div>
-                \`).join('')}
-              </div>
-            </div>
-          \`;
-        }
-
-        pubEl.innerHTML = \`
-          <div class="compartment-header">
-            <div class="compartment-badge badge-public">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
-              <span>PUBLIC COMPARTMENT</span>
-            </div>
-            <span class="compartment-access-rule">🔓 External calls enter via Opening A</span>
-          </div>
-          \${pubBucketsHtml}
-          \${pubFuncsHtml}
-        \`;
-        pubWrap.appendChild(pubEl);
-        boxEl.appendChild(pubWrap);
-
-        classRoot.appendChild(boxEl);
         mainWrapper.appendChild(classRoot);
       }
 
