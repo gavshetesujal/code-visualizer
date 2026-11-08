@@ -70,6 +70,15 @@ interface ClassDef {
     bodyLines: { lineNum: number; raw: string; trimmed: string }[];
     declaringClass: string;
   }[];
+  constructorDef?: {
+    name: string;
+    returnType: string;
+    access: ClassAccessSpecifier;
+    params: { type: string; name: string }[];
+    startLine: number;
+    bodyLines: { lineNum: number; raw: string; trimmed: string }[];
+    declaringClass: string;
+  };
 }
 
 export class ProgramSimulator {
@@ -618,21 +627,21 @@ export class ProgramSimulator {
         });
       }
 
-      // 2.5 Resolve member variables of active class object if in class context
-      if (currentExecutingObject && objectInstances.has(currentExecutingObject)) {
-        const obj = objectInstances.get(currentExecutingObject)!;
-        Object.keys(obj.memberValues).forEach(mName => {
-          exp = exp.replace(new RegExp(`\\b${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
-          exp = exp.replace(new RegExp(`this->${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
-        });
-      }
-
-      // Also resolve obj.varName e.g. s.age or s1.age
+      // 2.3 Resolve explicit obj.varName e.g. d.animalAge, s1.age, etc.
       objectInstances.forEach((obj, objName) => {
         Object.keys(obj.memberValues).forEach(mName => {
           exp = exp.replace(new RegExp(`\\b${objName}\\.${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
         });
       });
+
+      // 2.5 Resolve member variables of active class object if in class context (not preceded by . or ->)
+      if (currentExecutingObject && objectInstances.has(currentExecutingObject)) {
+        const obj = objectInstances.get(currentExecutingObject)!;
+        Object.keys(obj.memberValues).forEach(mName => {
+          exp = exp.replace(new RegExp(`(?<![.\\->])\\b${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
+          exp = exp.replace(new RegExp(`this->${mName}\\b`, 'g'), obj.memberValues[mName] ?? '0');
+        });
+      }
 
       // 3. Substitute global / main variables
       varMap.forEach((v, k) => {
@@ -645,13 +654,19 @@ export class ProgramSimulator {
 
     // Helper: Pure arithmetic expression evaluation
     const evaluateMathExpr = (exp: string): string => {
-      const cleaned = exp.trim();
+      let cleaned = exp.trim();
       if (!cleaned) return '0';
       if (cleaned.startsWith('"') && cleaned.endsWith('"')) return cleaned.slice(1, -1);
       if (cleaned.startsWith("'") && cleaned.endsWith("'")) return cleaned.slice(1, -1);
+      // Strip C++ literal suffixes (e.g. 85.5f, 5.0f, 100L, 100ULL)
+      cleaned = cleaned
+        .replace(/(\d+(?:\.\d+)?)[fF]\b/g, '$1')
+        .replace(/(\d+)[uU]?[lL]{1,2}\b/g, '$1');
+
       if (/^-?\d+(\.\d+)?$/.test(cleaned)) return cleaned;
       if (cleaned === 'true') return 'true';
       if (cleaned === 'false') return 'false';
+      if (/^[a-zA-Z_]\w*$/.test(cleaned)) return cleaned;
 
       try {
         const res = Function(`"use strict"; return (${cleaned});`)();
@@ -661,10 +676,67 @@ export class ProgramSimulator {
       }
     };
 
-    // Helper: Evaluate expressions that may contain function calls (e.g. n * factorial(n - 1) or fib(n-1) + fib(n-2))
+    // Helper: Evaluate expressions that may contain function calls (e.g. n * factorial(n - 1) or s1.getAge())
     const evalExpressionWithCalls = (rawExpr: string, frame?: FunctionCallFrame): string => {
       let expr = rawExpr.trim();
 
+      // 1. Check for method calls on objects: e.g. s1.getAge() or d.animalAge()
+      const methodCallRegex = /\b([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\s*\(([^()]*)\)/;
+      let methodMatch = expr.match(methodCallRegex);
+      let methodGuard = 0;
+      while (methodMatch && methodGuard < 50) {
+        methodGuard++;
+        const objName = methodMatch[1];
+        const methodName = methodMatch[2];
+        const rawArgStr = methodMatch[3];
+
+        if (objectInstances.has(objName)) {
+          const obj = objectInstances.get(objName)!;
+          const clsDef = classDefs.get(obj.className);
+          if (clsDef) {
+            const directFunc = clsDef.publicFunctions.find(f => f.name === methodName) ||
+                               clsDef.protectedFunctions.find(f => f.name === methodName) ||
+                               clsDef.privateFunctions.find(f => f.name === methodName);
+            let targetMethod = directFunc;
+            let targetDeclaringCls = clsDef;
+
+            if (!targetMethod) {
+              const inherited = ProgramSimulator.resolveInheritance(obj.className, classDefs);
+              const inhFunc = inherited.inheritedFunctions.find(f => f.name === methodName);
+              if (inhFunc && classDefs.has(inhFunc.originalClassName)) {
+                targetDeclaringCls = classDefs.get(inhFunc.originalClassName)!;
+                targetMethod = targetDeclaringCls.publicFunctions.find(f => f.name === methodName) ||
+                               targetDeclaringCls.protectedFunctions.find(f => f.name === methodName);
+              }
+            }
+
+            if (targetMethod) {
+              const argParts = rawArgStr ? rawArgStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+              const evaluatedArgs: string[] = [];
+              for (const argPart of argParts) {
+                evaluatedArgs.push(evalExpressionWithCalls(argPart, frame));
+              }
+
+              const retVal = executeClassMemberFunction(
+                targetDeclaringCls,
+                obj,
+                targetMethod,
+                evaluatedArgs,
+                `${objName}.${methodName}(${evaluatedArgs.join(', ')})`,
+                false,
+                frame
+              );
+
+              expr = expr.slice(0, methodMatch.index!) + retVal + expr.slice(methodMatch.index! + methodMatch[0].length);
+              methodMatch = expr.match(methodCallRegex);
+              continue;
+            }
+          }
+        }
+        break;
+      }
+
+      // 2. Check for global standalone function calls (e.g. factorial(n - 1) or add(10, 20))
       const callRegex = /\b([a-zA-Z_]\w*)\s*\(([^()]*)\)/;
       let match = expr.match(callRegex);
 
@@ -908,7 +980,7 @@ export class ProgramSimulator {
     const executeClassMemberFunction = (
       targetCls: ClassDef,
       targetObj: ClassObjectInstance,
-      targetFunc: ClassDef['privateFunctions'][0] | ClassDef['protectedFunctions'][0] | ClassDef['publicFunctions'][0],
+      targetFunc: ClassDef['privateFunctions'][0] | ClassDef['protectedFunctions'][0] | ClassDef['publicFunctions'][0] | NonNullable<ClassDef['constructorDef']>,
       evaluatedArgs: string[],
       callSig: string,
       isInternalCall: boolean = false,
@@ -938,6 +1010,7 @@ export class ProgramSimulator {
       currentHighlightedMember = targetFunc.name;
 
       const declaringClsName = targetFunc.declaringClass || targetCls.name;
+      const isCtor = !targetFunc.returnType;
 
       // Bind parameters
       const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => {
@@ -972,8 +1045,12 @@ export class ProgramSimulator {
 
       recordStep(
         targetFunc.startLine,
-        `${targetFunc.returnType} ${targetFunc.name}(${targetFunc.params.map((p, i) => `${p.type} ${p.name} = ${evaluatedArgs[i] || '0'}`).join(', ')})`,
-        `Entering ${targetFunc.access.toUpperCase()} member function '${declaringClsName}::${targetFunc.name}()' on object '${targetObj.objectName}' (${targetObj.className}).`,
+        isCtor
+          ? `${targetFunc.name}(${targetFunc.params.map((p, i) => `${p.type} ${p.name} = ${evaluatedArgs[i] || '0'}`).join(', ')})`
+          : `${targetFunc.returnType} ${targetFunc.name}(${targetFunc.params.map((p, i) => `${p.type} ${p.name} = ${evaluatedArgs[i] || '0'}`).join(', ')})`,
+        isCtor
+          ? `Executing constructor for '${targetObj.objectName}' (${targetObj.className}) with arguments (${evaluatedArgs.join(', ')}).`
+          : `Entering ${targetFunc.access.toUpperCase()} member function '${declaringClsName}::${targetFunc.name}()' on object '${targetObj.objectName}' (${targetObj.className}).`,
         { funcFrame: frame }
       );
 
@@ -991,7 +1068,7 @@ export class ProgramSimulator {
         return funcReturnValue;
       }
 
-      if (!hasExplicitReturn && targetFunc.returnType === 'void') {
+      if (!hasExplicitReturn && (targetFunc.returnType === 'void' || isCtor)) {
         funcReturnValue = '';
       }
 
@@ -1002,8 +1079,10 @@ export class ProgramSimulator {
 
       recordStep(
         targetFunc.startLine,
-        targetFunc.returnType === 'void' ? `return;` : `return ${funcReturnValue};`,
-        `Member function '${declaringClsName}::${targetFunc.name}()' completed, returning ${funcReturnValue ? funcReturnValue : 'void'}.`,
+        isCtor ? `// Constructor completed` : (targetFunc.returnType === 'void' ? `return;` : `return ${funcReturnValue};`),
+        isCtor
+          ? `Constructor for '${targetObj.objectName}' (${targetObj.className}) completed.`
+          : `Member function '${declaringClsName}::${targetFunc.name}()' completed, returning ${funcReturnValue ? funcReturnValue : 'void'}.`,
         { funcFrame: frame }
       );
 
@@ -1043,7 +1122,7 @@ export class ProgramSimulator {
         }
 
         // Return statement (supports recursive calls like return n * factorial(n - 1);)
-        if (trimmed.startsWith('return')) {
+        if (/^return\b/.test(trimmed)) {
           const retMatch = trimmed.match(/^return\s*(.*?);?$/);
           const retRawExpr = retMatch ? retMatch[1].trim() : '';
           let retVal = '';
@@ -1067,7 +1146,57 @@ export class ProgramSimulator {
           return { hasReturned: true, returnValue: retVal };
         }
 
-        // 0. Class Object Instantiation: e.g. Student s; or Dog d; or Dog d1, d2;
+        // 0. Class Object Instantiation with Constructor Arguments: e.g. Student s1("Alex", 18, 101);
+        const objCtorMatch = trimmed.match(/^([a-zA-Z_]\w*)\s+([a-zA-Z_]\w*)\s*\((.*?)\)\s*;$/);
+        if (objCtorMatch && classDefs.has(objCtorMatch[1])) {
+          const clsName = objCtorMatch[1];
+          const objName = objCtorMatch[2];
+          const rawArgs = objCtorMatch[3].trim();
+          const clsDef = classDefs.get(clsName)!;
+          const inherited = ProgramSimulator.resolveInheritance(clsName, classDefs);
+
+          const memberVals: Record<string, string> = {};
+          inherited.inheritedVariables.forEach(v => {
+            memberVals[v.name] = v.defaultValue || '0';
+          });
+          clsDef.privateVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
+          clsDef.protectedVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
+          clsDef.publicVariables.forEach(v => { memberVals[v.name] = v.defaultValue || '0'; });
+
+          const newObj: ClassObjectInstance = {
+            objectName: objName,
+            className: clsName,
+            memberValues: memberVals
+          };
+          objectInstances.set(objName, newObj);
+          currentExecutingObject = objName;
+          currentExecutingClass = clsName;
+
+          const baseSummary = clsDef.baseClasses && clsDef.baseClasses.length > 0
+            ? ` (inheriting from ${clsDef.baseClasses.map(b => `${b.accessMode} ${b.baseClassName}`).join(', ')})`
+            : '';
+
+          if (clsDef.constructorDef) {
+            const evaluatedArgs = rawArgs ? splitTopLevelCommas(rawArgs).map(a => evaluateMathExpr(substituteVariables(a, currentFrame))) : [];
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `Instantiated object '${objName}' of class '${clsName}'${baseSummary}. Calling constructor with arguments (${evaluatedArgs.join(', ')}).`
+            );
+            executeClassMemberFunction(clsDef, newObj, clsDef.constructorDef, evaluatedArgs, `${clsName}(${evaluatedArgs.join(', ')})`, false, currentFrame);
+          } else {
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `Instantiated object '${objName}' of class '${clsName}'${baseSummary}. Blueprint initialized with member compartments and inherited state.`
+            );
+          }
+
+          idx++;
+          continue;
+        }
+
+        // 0. Class Object Instantiation without Arguments: e.g. Student s; or Dog d; or Dog d1, d2;
         const objDeclMatch = trimmed.match(/^([a-zA-Z_]\w*)\s+([^;()]+);$/);
         if (objDeclMatch && classDefs.has(objDeclMatch[1])) {
           const clsName = objDeclMatch[1];
@@ -2092,7 +2221,7 @@ export class ProgramSimulator {
         }
 
         // 3. DO-WHILE LOOP
-        if (trimmed.startsWith('do')) {
+        if (/^do\b/.test(trimmed)) {
           const res = this.extractBlockBody(stmts, idx);
           const bodyLines = res.bodyLines;
           let endLineIdx = res.endLineIdx;
@@ -2151,7 +2280,7 @@ export class ProgramSimulator {
 
             // Check condition after body execution
             const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
-            const condPassed = this.evalGeneralCondition(condPart, varMap);
+            const condPassed = evalGeneralCondition(condPart, currentFrame);
             previousValues.push(String(curValNum));
             loopState.phase = 'condition';
             loopState.conditionPassed = condPassed;
@@ -2208,7 +2337,7 @@ export class ProgramSimulator {
         }
 
         // 4. IF / ELSE IF / ELSE BRANCHING
-        if (trimmed.startsWith('if')) {
+        if (/^if\b/.test(trimmed)) {
           const ifMatch = trimmed.match(/^if\s*\(\s*(.*?)\s*\)(?:\s*(.+))?$/);
           if (ifMatch) {
             const condPart = ifMatch[1];
@@ -2925,6 +3054,7 @@ export class ProgramSimulator {
         const { bodyLines, endLineIdx } = this.extractBlockBody(lines, i);
 
         let currentAccess: ClassAccessSpecifier = 'private'; // default in C++ class
+        let constructorDef: ClassDef['constructorDef'] = undefined;
         const privateVariables: ClassMemberVariable[] = [];
         const protectedVariables: ClassMemberVariable[] = [];
         const publicVariables: ClassMemberVariable[] = [];
@@ -2953,6 +3083,34 @@ export class ProgramSimulator {
           if (bLine.match(/^public\s*:/)) {
             currentAccess = 'public';
             bi++;
+            continue;
+          }
+
+          // Check for constructor: e.g. Student(string n, int a, int r)
+          const ctorMatch = bLine.match(/^([a-zA-Z_]\w*)\s*\((.*?)\)\s*\{?$/);
+          if (ctorMatch && ctorMatch[1] === className) {
+            const rawParams = ctorMatch[2].trim();
+            const ctorStartLine = bodyLines[bi].lineNum;
+            const params: { type: string; name: string }[] = [];
+            if (rawParams && rawParams !== 'void') {
+              rawParams.split(',').forEach(p => {
+                const parts = p.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                  params.push({ type: parts[0], name: parts[parts.length - 1].replace(/[&*\[\]]/g, '') });
+                }
+              });
+            }
+            const extracted = this.extractBlockBody(bodyLines, bi);
+            constructorDef = {
+              name: className,
+              returnType: '',
+              access: currentAccess,
+              params,
+              startLine: ctorStartLine,
+              bodyLines: extracted.bodyLines,
+              declaringClass: className
+            };
+            bi = extracted.endLineIdx + 1;
             continue;
           }
 
@@ -3033,7 +3191,8 @@ export class ProgramSimulator {
           publicVariables,
           privateFunctions,
           protectedFunctions,
-          publicFunctions
+          publicFunctions,
+          constructorDef
         });
 
         i = endLineIdx + 1;
