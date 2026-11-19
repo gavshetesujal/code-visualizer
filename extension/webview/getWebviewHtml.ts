@@ -219,9 +219,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       transform-origin: 50% 50%;
       transition: transform 0.05s linear;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
+      box-sizing: border-box;
+      padding: 64px 0 84px;
     }
+    #nodesContainer { margin: auto 0; }
 
     .canvas-container.perspective-3d .canvas-viewport {
       transform-style: preserve-3d;
@@ -2031,7 +2034,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     <div class="canvas-hud">
       <button class="hud-btn" id="zoomInBtn" title="Zoom In">+</button>
       <button class="hud-btn" id="zoomOutBtn" title="Zoom Out">−</button>
-      <button class="hud-btn" id="centerBtn" title="Recenter View">⊙</button>
+      <button class="hud-btn" id="centerBtn" title="Fit view (never smaller than 70%). Drag the background to move, scroll to zoom.">⊙</button>
     </div>
   </main>
 
@@ -2078,6 +2081,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
     const vscode = acquireVsCodeApi();
     let session = ${sessionJson};
+    let compileFailed = false;
     let currentStepIndex = session.currentStepIndex || 0;
     let isPlaying = false;
 
@@ -2117,6 +2121,34 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       canvasViewport.style.transform = \`translate(\${panX}px, \${panY}px) scale(\${zoomLevel})\`;
     }
 
+    // Long values (for example "not simulated" or a long string) shrink to fit their box instead of being cut off.
+    function fitBucketText() {
+      document.querySelectorAll('.bucket-current-val').forEach(el => {
+        const box = el.closest('.bucket-value-container') || el.parentElement;
+        if (!box) return;
+        el.style.whiteSpace = 'nowrap';
+        el.style.fontSize = '';
+        let size = parseFloat(getComputedStyle(el).fontSize) || 32;
+        const limit = Math.max(box.clientWidth - 12, 20);
+        while (size > 12 && el.scrollWidth > limit) {
+          size -= 2;
+          el.style.fontSize = size + 'px';
+        }
+      });
+    }
+
+    // Fit: show as much as fits, but never shrink below 70% so text stays readable. Larger views are moved by dragging.
+    function fitView() {
+      const cw = nodesContainer.scrollWidth || 1;
+      const ch = nodesContainer.scrollHeight || 1;
+      const aw = canvasContainer.clientWidth || 1;
+      const ah = canvasContainer.clientHeight || 1;
+      zoomLevel = Math.max(0.7, Math.min(1.0, aw / cw, ah / ch));
+      panX = 0;
+      panY = 0;
+      updateTransform();
+    }
+
     canvasContainer.addEventListener('mousedown', (e) => {
       if (e.target.closest('.workflow-block') || e.target.closest('.canvas-hud') || e.target.closest('.live-code-indicator')) return;
       isDragging = true;
@@ -2153,8 +2185,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     });
 
     centerBtn.addEventListener('click', () => {
-      panX = 0; panY = 0; zoomLevel = 1.0;
-      updateTransform();
+      fitView();
     });
 
     // 2D / 3D Switcher
@@ -2292,6 +2323,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       }
 
       const mainWrapper = document.createElement('div');
+      if (compileFailed) {
+        const warn = document.createElement('div');
+        warn.textContent = '\u26A0 Compilation failed (see the terminal). This view is a simulation of your source, not a run of a compiled program. Fix the compile error before trusting it.';
+        warn.style.cssText = 'max-width:640px;padding:8px 14px;border:1px solid #f59e0b;border-radius:10px;color:#fbbf24;background:rgba(245,158,11,0.10);font-size:12px;font-weight:600;text-align:center;';
+        mainWrapper.appendChild(warn);
+      }
       mainWrapper.style.display = 'flex';
       mainWrapper.style.flexDirection = 'column';
       mainWrapper.style.alignItems = 'center';
@@ -2835,12 +2872,16 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         stackWrapper.className = 'call-stack-container';
 
         // Stack Header with Breadcrumb Trail
+        // Only call it "RECURSIVE" when a function really appears more than once in the stack
+        const frameFnNames = frames.map(f => String(f.callSignature).split('(')[0]);
+        const isRecursiveStack = frameFnNames.some((n, i) => frameFnNames.indexOf(n) !== i);
+        const stackTitle = isRecursiveStack ? 'RECURSIVE CALL STACK' : 'CALL STACK';
         const stackHeader = document.createElement('div');
         stackHeader.className = 'call-stack-header';
         stackHeader.innerHTML = \`
           <div class="call-stack-badge">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-            <span>RECURSIVE CALL STACK (Depth \${frames.length})</span>
+            <span>\${stackTitle} (Depth \${frames.length})</span>
           </div>
           <div class="stack-breadcrumb-row">
             \${frames.map((f, i) => \`
@@ -2893,8 +2934,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
             \${frame.returnValue !== undefined && frame.state === 'returning' ? \`
               <div class="func-return-banner">
-                <span>✓ Return Value:</span>
-                <strong>\${frame.returnValue}</strong>
+                <span>\${frame.returnValue === '' ? '✓ Returned (void, no value)' : '✓ Return Value:'}</span>
+                \${frame.returnValue === '' ? '' : \`<strong>\${frame.returnValue}</strong>\`}
                 <span style="font-size:11px; font-weight:normal; color:#a7f3d0; margin-left:6px;">➔ to \${frame.callerFunctionName || 'caller'}</span>
               </div>
             \` : ''}
@@ -2957,7 +2998,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
               <span>\${ff.calculationDetails}</span>
             </div>
           \` : ''}
-          \${ff.returnValue !== undefined ? \`<div class="func-return-banner"><span>✓ Return Value:</span><strong>\${ff.returnValue}</strong></div>\` : ''}
+          \${ff.returnValue !== undefined ? \`<div class="func-return-banner"><span>\${ff.returnValue === '' ? '✓ Returned (void, no value)' : '✓ Return Value:'}</span>\${ff.returnValue === '' ? '' : \`<strong>\${ff.returnValue}</strong>\`}</div>\` : ''}
           <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters:</div>
           <div class="buckets-grid" style="padding: 10px 0;">
             \${ff.parameters.map(p => \`
@@ -3127,7 +3168,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
             <div class="bucket-value-container">
               \${valHtml}
             </div>
-            \${b.pointsTo ? \`<span class="ptr-tag">➔ &\${b.pointsTo}</span>\` : ''}
+            \${b.pointsTo ? \`<span class="ptr-tag" title="Symbolic: the visualizer shows which variable it points to, not a real memory address.">➔ &\${b.pointsTo} (symbolic)</span>\` : ''}
           \`;
           grid.appendChild(bucketEl);
         });
@@ -3149,7 +3190,16 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         mainWrapper.appendChild(terminalBadge);
       }
 
+      // Visible completion message on the final step (main returned)
+      if (step.explanation && String(step.explanation).indexOf('The program has finished.') !== -1) {
+        const finished = document.createElement('div');
+        finished.textContent = '\u2713 Program finished. ' + String(step.explanation).replace(' The program has finished.', '');
+        finished.style.cssText = 'padding:10px 16px;border:1px solid #1fbf8f;border-radius:10px;color:#1fbf8f;background:rgba(31,191,143,0.10);font-weight:600;font-size:13px;';
+        mainWrapper.insertBefore(finished, mainWrapper.firstChild);
+      }
+
       nodesContainer.appendChild(mainWrapper);
+      fitBucketText();
     }
 
     function renderEmptyCanvas(msg) {
@@ -3348,7 +3398,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
             pausePlayback();
           }
           break;
+        case 'compileStatus':
+          compileFailed = msg.status === 'failed';
+          renderCanvas();
+          break;
         case 'init':
+          compileFailed = false;
           session = msg.session;
           currentStepIndex = session.currentStepIndex || 0;
           renderCanvas();
