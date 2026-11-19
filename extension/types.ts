@@ -348,4 +348,5 @@ export type ExtensionToWebviewMessage =
   | { type: 'init'; session: SessionData }
   | { type: 'setStep'; stepIndex: number }
   | { type: 'appendStep'; step: ExecutionStep }
-  | { type: 'groupToggled'; groupId: string; isExpanded: boolean };
+  | { type: 'groupToggled'; groupId: string; isExpanded: boolean }
+  | { type: 'compileStatus'; status: 'failed' | 'ok'; compiler?: string };
