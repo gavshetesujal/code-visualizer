@@ -43,7 +43,9 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./tsconfig.json",
-    "watch": "tsc -watch -p ./tsconfig.json"
+    "watch": "tsc -watch -p ./tsconfig.json",
+    "test": "npm run compile && node tests/run.js",
+    "test:gaps": "npm run compile && node tests/run.js --known-gaps"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
