@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { SessionData } from '../types';
+import { buildCallGraph } from '../tracer/CallGraph';
 
 export function getWebviewHtml(session: SessionData, webview: vscode.Webview): string {
-  const sessionJson = JSON.stringify(session).replace(/</g, '\\u003c');
+  const sessionJson = JSON.stringify({ ...session, callGraph: buildCallGraph(session.steps || []) }).replace(/</g, '\\u003c');
   const nonce = getNonce();
 
   const initialStep = (session.steps && session.steps[session.currentStepIndex || 0]) || null;
@@ -175,6 +176,23 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       gap: 8px;
     }
 
+
+    .fmap { position:absolute; inset:0; z-index:30; display:none; background:#070b14; overflow:auto; }
+    .fmap.open { display:flex; flex-direction:column; }
+    .fmap-main { flex:1; min-height:0; padding:14px 16px 20px; overflow:auto; }
+    .fmap-note { font-size:11px; color:#94a3b8; margin-bottom:10px; max-width:640px; }
+    .fmap-side { display:none; flex:0 0 auto; max-height:42%; border-top:1px solid rgba(255,255,255,0.1); padding:12px 16px 80px; overflow:auto; font-size:12px; color:#cbd5e1; }
+    .fmap-node { fill:#0f1a2e; stroke:#38bdf8; stroke-width:1.5; cursor:pointer; }
+    .fmap-node.sel { stroke:#fbbf24; stroke-width:2.5; }
+    .fmap-node.cur { fill:#12304a; }
+    .fmap-name { fill:#e2e8f0; font-size:15px; font-weight:700; pointer-events:none; }
+    .fmap-sub { fill:#94a3b8; font-size:11px; pointer-events:none; }
+    .fmap-edge { stroke:#38bdf8; fill:none; stroke-width:1.6; opacity:0.85; }
+    .fmap-elabel { fill:#7dd3fc; font-size:11px; }
+    .fmap-call { display:flex; gap:8px; align-items:center; justify-content:space-between; padding:6px 8px; margin:4px 0; border:1px solid rgba(255,255,255,0.1); border-radius:8px; background:rgba(255,255,255,0.03); }
+    .fmap-btn { background:rgba(255,255,255,0.06); color:#cbd5e1; border:1px solid rgba(255,255,255,0.2); border-radius:6px; padding:3px 8px; cursor:pointer; font-size:11px; white-space:nowrap; }
+    .fmap-call button { background:rgba(56,189,248,0.12); color:#7dd3fc; border:1px solid rgba(56,189,248,0.4); border-radius:6px; padding:3px 8px; cursor:pointer; font-size:11px; white-space:nowrap; }
+    .fmap-code { font-family: var(--vscode-editor-font-family, monospace); font-size:12px; color:#e2e8f0; word-break:break-word; }
     .mode-switch-btn {
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -219,9 +237,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       transform-origin: 50% 50%;
       transition: transform 0.05s linear;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
+      box-sizing: border-box;
+      padding: 64px 0 84px;
     }
+    #nodesContainer { margin: auto 0; }
 
     .canvas-container.perspective-3d .canvas-viewport {
       transform-style: preserve-3d;
@@ -1396,6 +1417,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
     .timeline-container {
       flex: 1;
+      min-width: 0;
       display: flex;
       align-items: center;
       position: relative;
@@ -1454,7 +1476,21 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       background: #0284c7;
     }
 
+    .timeline-thumb {
+      position: absolute;
+      top: -6px;
+      width: 16px;
+      height: 16px;
+      margin-left: -8px;
+      border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+      pointer-events: none;
+    }
+
     .step-counter-text {
+      flex: none;
+      white-space: nowrap;
       font-size: 13px;
       font-weight: 600;
       color: #94a3b8;
@@ -2006,6 +2042,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     <div class="top-tools">
       <button class="mode-switch-btn active" id="btn2D" title="Flat 2D workflow view">2D</button>
       <button class="mode-switch-btn" id="btn3D" title="Spatial 3D depth view">3D</button>
+      <button class="mode-switch-btn" id="btnMap" title="Function map: which function calls which (from the source simulation)">Map</button>
     </div>
   </header>
 
@@ -2020,6 +2057,11 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       </div>
     </div>
 
+    <div class="fmap" id="fmap">
+      <div class="fmap-main"><div class="fmap-note">Function map. An arrow means "this function calls that function". Each number is calls so far / calls in the whole simulated run. Dashed arrows have not happened yet at this step. This comes from the source simulation, not a real run. Click a function to see each call with its arguments and result.</div><div id="fmapSvgHost"></div></div>
+      <div class="fmap-side" id="fmapSide">Click a function to see its calls.</div>
+    </div>
+
     <!-- Zoomable & Pannable Viewport -->
     <div class="canvas-viewport" id="canvasViewport">
       <div class="visual-world" id="visualWorld">
@@ -2031,7 +2073,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     <div class="canvas-hud">
       <button class="hud-btn" id="zoomInBtn" title="Zoom In">+</button>
       <button class="hud-btn" id="zoomOutBtn" title="Zoom Out">−</button>
-      <button class="hud-btn" id="centerBtn" title="Recenter View">⊙</button>
+      <button class="hud-btn" id="centerBtn" title="Fit view (never smaller than 70%). Drag the background to move, scroll to zoom.">⊙</button>
     </div>
   </main>
 
@@ -2078,6 +2120,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
     const vscode = acquireVsCodeApi();
     let session = ${sessionJson};
+    let compileFailed = false;
     let currentStepIndex = session.currentStepIndex || 0;
     let isPlaying = false;
 
@@ -2117,6 +2160,34 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       canvasViewport.style.transform = \`translate(\${panX}px, \${panY}px) scale(\${zoomLevel})\`;
     }
 
+    // Long values (for example "not simulated" or a long string) shrink to fit their box instead of being cut off.
+    function fitBucketText() {
+      document.querySelectorAll('.bucket-current-val').forEach(el => {
+        const box = el.closest('.bucket-value-container') || el.parentElement;
+        if (!box) return;
+        el.style.whiteSpace = 'nowrap';
+        el.style.fontSize = '';
+        let size = parseFloat(getComputedStyle(el).fontSize) || 32;
+        const limit = Math.max(box.clientWidth - 12, 20);
+        while (size > 12 && el.scrollWidth > limit) {
+          size -= 2;
+          el.style.fontSize = size + 'px';
+        }
+      });
+    }
+
+    // Fit: show as much as fits, but never shrink below 70% so text stays readable. Larger views are moved by dragging.
+    function fitView() {
+      const cw = nodesContainer.scrollWidth || 1;
+      const ch = nodesContainer.scrollHeight || 1;
+      const aw = canvasContainer.clientWidth || 1;
+      const ah = canvasContainer.clientHeight || 1;
+      zoomLevel = Math.max(0.7, Math.min(1.0, aw / cw, ah / ch));
+      panX = 0;
+      panY = 0;
+      updateTransform();
+    }
+
     canvasContainer.addEventListener('mousedown', (e) => {
       if (e.target.closest('.workflow-block') || e.target.closest('.canvas-hud') || e.target.closest('.live-code-indicator')) return;
       isDragging = true;
@@ -2153,8 +2224,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
     });
 
     centerBtn.addEventListener('click', () => {
-      panX = 0; panY = 0; zoomLevel = 1.0;
-      updateTransform();
+      fitView();
     });
 
     // 2D / 3D Switcher
@@ -2170,12 +2240,144 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       canvasContainer.classList.add('perspective-3d');
     });
 
+
+    // ===== Function map (calls graph from the source simulation) =====
+    const btnMap = document.getElementById('btnMap');
+    const fmap = document.getElementById('fmap');
+    let fmapSelected = null;
+    function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function currentFunctionName() {
+      const st = session.steps[currentStepIndex];
+      const fr = st && st.callStackFrames && st.callStackFrames.length ? st.callStackFrames.filter(f => f.state !== 'waiting').pop() : null;
+      return fr ? String(fr.functionName).replace(/\\(.*$/, '') : 'main';
+    }
+    function layoutMap(g) {
+      const depth = {}; depth['main'] = 0;
+      const queue = ['main'];
+      while (queue.length) {
+        const a = queue.shift();
+        g.edges.forEach(e => { if (e.from === a && e.to !== a && depth[e.to] === undefined) { depth[e.to] = depth[a] + 1; queue.push(e.to); } });
+      }
+      g.nodes.forEach(n => { if (depth[n.name] === undefined) depth[n.name] = 0; });
+      const cols = {};
+      g.nodes.forEach(n => { (cols[depth[n.name]] = cols[depth[n.name]] || []).push(n.name); });
+      const W = 200, H = 78, GX = 80, GY = 30, PER = 4, pos = {};
+      let colX = 0;
+      Object.keys(cols).sort((a, b) => a - b).forEach(c => {
+        const names = cols[c];
+        const sub = Math.ceil(names.length / PER);
+        names.forEach((name, i) => { pos[name] = { x: 24 + (colX + Math.floor(i / PER)) * (W + GX), y: 40 + (i % PER) * (H + GY) }; });
+        colX += sub;
+      });
+      return { pos: pos, W: W, H: H };
+    }
+    let fmapReveal = false;
+    function callsSoFar(from, to) {
+      return session.callGraph.instances.filter(i => (from === null || i.caller === from) && i.callee === to && i.startStep <= currentStepIndex).length;
+    }
+    function renderFunctionMap() {
+      const host = document.getElementById('fmapSvgHost');
+      const g = session.callGraph;
+      if (!g || !g.nodes || !g.nodes.length) { host.textContent = 'No functions to show yet.'; return; }
+      const L = layoutMap(g), pos = L.pos;
+      let maxX = 0, maxY = 0;
+      g.nodes.forEach(n => { maxX = Math.max(maxX, pos[n.name].x + L.W); maxY = Math.max(maxY, pos[n.name].y + L.H); });
+      const cur = currentFunctionName();
+      let svg = '<svg width="' + (maxX + 170) + '" height="' + (maxY + 50) + '" xmlns="http://www.w3.org/2000/svg"><defs><marker id="fmArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#38bdf8"/></marker></defs>';
+      g.edges.forEach(e => {
+        const a = pos[e.from], b = pos[e.to];
+        if (!a || !b) return;
+        const so = e.instances.filter(i => i.startStep <= currentStepIndex).length;
+        const style = so === 0 ? ' style="stroke-dasharray:5 4;opacity:0.35"' : '';
+        let d, lx, ly, anchor = 'middle';
+        if (e.from === e.to) {
+          const x = a.x + L.W, y = a.y + 22;
+          d = 'M ' + x + ' ' + y + ' C ' + (x + 50) + ' ' + (y - 6) + ' ' + (x + 50) + ' ' + (y + 34) + ' ' + x + ' ' + (y + 28);
+          lx = x + 54; ly = y + 14; anchor = 'start';
+        } else {
+          const x1 = a.x + L.W, y1 = a.y + L.H / 2, x2 = b.x, y2 = b.y + L.H / 2;
+          const back = x2 < x1;
+          const sx = back ? a.x : x1, tx = back ? b.x + L.W : x2;
+          const mx = (sx + tx) / 2;
+          d = 'M ' + sx + ' ' + y1 + ' C ' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + tx + ' ' + y2;
+          lx = back ? tx + 6 : tx - 8; ly = y2 - 7; anchor = back ? 'start' : 'end';
+        }
+        const lab = (e.from === e.to ? 'recursive ' : '') + so + '/' + e.count;
+        svg += '<path class="fmap-edge"' + style + ' d="' + d + '" marker-end="url(#fmArrow)"></path><text class="fmap-elabel" x="' + lx + '" y="' + ly + '" text-anchor="' + anchor + '">' + lab + '</text>';
+      });
+      g.nodes.forEach(n => {
+        const p = pos[n.name];
+        const so = callsSoFar(null, n.name);
+        const selfCalls = g.edges.filter(e => e.from === n.name && e.to === n.name).reduce((t, e) => t + e.count, 0);
+        const line2 = n.name === 'main' ? 'program start' : 'called ' + so + ' of ' + n.calls + (n.calls === 1 ? ' time' : ' times');
+        const line3 = n.isRecursive ? '\u21BB recursive (' + selfCalls + ' of the ' + n.calls + ' calls are self-calls)' : '';
+        svg += '<g data-fn="' + esc(n.name) + '" class="fmap-g"><rect class="fmap-node' + (fmapSelected === n.name ? ' sel' : '') + (cur === n.name ? ' cur' : '') + '" x="' + p.x + '" y="' + p.y + '" width="' + L.W + '" height="' + L.H + '" rx="12"' + (n.name !== 'main' && so === 0 ? ' style="opacity:0.55"' : '') + '></rect>' +
+          '<text class="fmap-name" x="' + (p.x + 14) + '" y="' + (p.y + 26) + '">' + esc(n.name.length > 20 ? n.name.slice(0, 19) + '\u2026' : n.name) + '()</text>' +
+          '<text class="fmap-sub" x="' + (p.x + 14) + '" y="' + (p.y + 44) + '">' + line2 + '</text>' +
+          (line3 ? '<text class="fmap-sub" x="' + (p.x + 14) + '" y="' + (p.y + 58) + '">' + esc(line3.length > 34 ? '\u21BB recursive (' + selfCalls + ' self-calls)' : line3) + '</text>' : '') +
+          (cur === n.name ? '<text class="fmap-sub" style="fill:#34d399" x="' + (p.x + 14) + '" y="' + (p.y + 72) + '">\u25CF running at this step</text>' : '') + '</g>';
+      });
+      svg += '</svg>';
+      host.innerHTML = svg;
+      host.querySelectorAll('.fmap-g').forEach(el => el.addEventListener('click', () => { fmapSelected = el.getAttribute('data-fn'); renderFunctionMap(); renderMapSide(); }));
+    }
+    function renderMapSide() {
+      const side = document.getElementById('fmapSide');
+      const g = session.callGraph;
+      if (!fmapSelected || !g) { side.style.display = 'none'; return; }
+      side.style.display = 'block';
+      const calls = g.instances.filter(i => i.callee === fmapSelected);
+      const callsOut = g.edges.filter(e => e.from === fmapSelected && e.to !== fmapSelected).map(e => e.to + '() \u00D7' + e.count);
+      let h = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><div style="font-size:15px;font-weight:700;color:#e2e8f0;">' + esc(fmapSelected) + '()</div><button id="fmapRevealBtn" class="fmap-btn">' + (fmapReveal ? 'Hide later calls' : 'Show full run') + '</button></div>';
+      h += '<div style="margin:4px 0 8px;color:#94a3b8;">You are at step ' + (currentStepIndex + 1) + '. Calls after this step stay hidden unless you choose "Show full run" (a simulated full run, not a live trace).</div>';
+      if (callsOut.length) h += '<div style="margin-bottom:8px;color:#94a3b8;">Calls in the full run: ' + esc(callsOut.join(', ')) + '</div>';
+      if (!calls.length) h += '<div>' + (fmapSelected === 'main' ? 'Program entry point.' : 'Never called in this run.') + '</div>';
+      calls.forEach(c => {
+        const future = c.startStep > currentStepIndex;
+        const returned = c.returnStep !== undefined && c.returnStep <= currentStepIndex;
+        const argText = c.args.map(a => a.name + ' = ' + a.value).join(', ');
+        let body;
+        if (future && !fmapReveal) {
+          body = '<div class="fmap-code" style="color:#64748b">later call (hidden)</div><div style="color:#64748b;">starts at step ' + (c.startStep + 1) + '</div>';
+        } else {
+          const res = (future || !returned) && !fmapReveal ? 'not returned yet' : (c.returnValue !== undefined ? 'returned ' + esc(c.returnValue) : 'no value returned');
+          body = '<div class="fmap-code">' + esc(c.callee) + '(' + esc(argText) + ')</div><div style="color:#94a3b8;">called by ' + esc(c.caller) + '()  \u2192  ' + res + (future ? '  (after this step)' : '') + '</div>';
+        }
+        h += '<div class="fmap-call"' + (future ? ' style="opacity:0.7"' : '') + '><div>' + body + '</div><button data-step="' + c.startStep + '">Step ' + (c.startStep + 1) + '</button></div>';
+      });
+      side.innerHTML = h;
+      side.querySelectorAll('button[data-step]').forEach(b => b.addEventListener('click', () => { closeFunctionMap(); setStep(parseInt(b.getAttribute('data-step'), 10)); }));
+      const rb = document.getElementById('fmapRevealBtn');
+      if (rb) rb.addEventListener('click', () => { fmapReveal = !fmapReveal; renderMapSide(); });
+    }
+    function openFunctionMap() {
+      btnMap.classList.add('active'); btn2D.classList.remove('active'); btn3D.classList.remove('active');
+      fmap.classList.add('open'); renderFunctionMap(); renderMapSide();
+    }
+    function closeFunctionMap() { fmap.classList.remove('open'); btnMap.classList.remove('active'); btn2D.classList.add('active'); }
+    btnMap.addEventListener('click', openFunctionMap);
+    btn2D.addEventListener('click', () => { fmap.classList.remove('open'); btnMap.classList.remove('active'); });
+    btn3D.addEventListener('click', () => { fmap.classList.remove('open'); btnMap.classList.remove('active'); });
+
     // Timeline Rendering
     function renderTimeline() {
       timelineNodes.innerHTML = '';
       const visibleSteps = (session.steps || []).filter(s => !s.isGroupCollapsed);
       const totalVisible = visibleSteps.length;
       let activeVisibleIndex = 0;
+
+      // Many steps: individual dots would overflow, so show one marker on the bar (click the bar to jump).
+      if (totalVisible > 40) {
+        let seen = 0;
+        session.steps.forEach((st, i) => { if (!st.isGroupCollapsed && i <= currentStepIndex) seen++; });
+        const thumb = document.createElement('div');
+        thumb.className = 'timeline-thumb';
+        const p = totalVisible > 1 ? Math.max(0, Math.min(100, ((seen - 1) / (totalVisible - 1)) * 100)) : 0;
+        thumb.style.left = p + '%';
+        timelineNodes.appendChild(thumb);
+        timelineFill.style.width = p + '%';
+        return;
+      }
 
       session.steps.forEach((step, idx) => {
         if (step.isGroupCollapsed) return;
@@ -2292,6 +2494,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
       }
 
       const mainWrapper = document.createElement('div');
+      if (compileFailed) {
+        const warn = document.createElement('div');
+        warn.textContent = '\u26A0 Compilation failed (see the terminal). This view is a simulation of your source, not a run of a compiled program. Fix the compile error before trusting it.';
+        warn.style.cssText = 'max-width:640px;padding:8px 14px;border:1px solid #f59e0b;border-radius:10px;color:#fbbf24;background:rgba(245,158,11,0.10);font-size:12px;font-weight:600;text-align:center;';
+        mainWrapper.appendChild(warn);
+      }
       mainWrapper.style.display = 'flex';
       mainWrapper.style.flexDirection = 'column';
       mainWrapper.style.alignItems = 'center';
@@ -2835,12 +3043,16 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         stackWrapper.className = 'call-stack-container';
 
         // Stack Header with Breadcrumb Trail
+        // Only call it "RECURSIVE" when a function really appears more than once in the stack
+        const frameFnNames = frames.map(f => String(f.callSignature).split('(')[0]);
+        const isRecursiveStack = frameFnNames.some((n, i) => frameFnNames.indexOf(n) !== i);
+        const stackTitle = isRecursiveStack ? 'RECURSIVE CALL STACK' : 'CALL STACK';
         const stackHeader = document.createElement('div');
         stackHeader.className = 'call-stack-header';
         stackHeader.innerHTML = \`
           <div class="call-stack-badge">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-            <span>RECURSIVE CALL STACK (Depth \${frames.length})</span>
+            <span>\${stackTitle} (Depth \${frames.length})</span>
           </div>
           <div class="stack-breadcrumb-row">
             \${frames.map((f, i) => \`
@@ -2893,8 +3105,8 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
 
             \${frame.returnValue !== undefined && frame.state === 'returning' ? \`
               <div class="func-return-banner">
-                <span>✓ Return Value:</span>
-                <strong>\${frame.returnValue}</strong>
+                <span>\${frame.returnValue === '' ? '✓ Returned (void, no value)' : '✓ Return Value:'}</span>
+                \${frame.returnValue === '' ? '' : \`<strong>\${frame.returnValue}</strong>\`}
                 <span style="font-size:11px; font-weight:normal; color:#a7f3d0; margin-left:6px;">➔ to \${frame.callerFunctionName || 'caller'}</span>
               </div>
             \` : ''}
@@ -2957,7 +3169,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
               <span>\${ff.calculationDetails}</span>
             </div>
           \` : ''}
-          \${ff.returnValue !== undefined ? \`<div class="func-return-banner"><span>✓ Return Value:</span><strong>\${ff.returnValue}</strong></div>\` : ''}
+          \${ff.returnValue !== undefined ? \`<div class="func-return-banner"><span>\${ff.returnValue === '' ? '✓ Returned (void, no value)' : '✓ Return Value:'}</span>\${ff.returnValue === '' ? '' : \`<strong>\${ff.returnValue}</strong>\`}</div>\` : ''}
           <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters:</div>
           <div class="buckets-grid" style="padding: 10px 0;">
             \${ff.parameters.map(p => \`
@@ -3127,7 +3339,7 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
             <div class="bucket-value-container">
               \${valHtml}
             </div>
-            \${b.pointsTo ? \`<span class="ptr-tag">➔ &\${b.pointsTo}</span>\` : ''}
+            \${b.pointsTo ? \`<span class="ptr-tag" title="Symbolic: the visualizer shows which variable it points to, not a real memory address.">➔ &\${b.pointsTo} (symbolic)</span>\` : ''}
           \`;
           grid.appendChild(bucketEl);
         });
@@ -3149,7 +3361,16 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
         mainWrapper.appendChild(terminalBadge);
       }
 
+      // Visible completion message on the final step (main returned)
+      if (step.explanation && String(step.explanation).indexOf('The program has finished.') !== -1) {
+        const finished = document.createElement('div');
+        finished.textContent = '\u2713 Program finished. ' + String(step.explanation).replace(' The program has finished.', '');
+        finished.style.cssText = 'padding:10px 16px;border:1px solid #1fbf8f;border-radius:10px;color:#1fbf8f;background:rgba(31,191,143,0.10);font-weight:600;font-size:13px;';
+        mainWrapper.insertBefore(finished, mainWrapper.firstChild);
+      }
+
       nodesContainer.appendChild(mainWrapper);
+      fitBucketText();
     }
 
     function renderEmptyCanvas(msg) {
@@ -3348,7 +3569,12 @@ export function getWebviewHtml(session: SessionData, webview: vscode.Webview): s
             pausePlayback();
           }
           break;
+        case 'compileStatus':
+          compileFailed = msg.status === 'failed';
+          renderCanvas();
+          break;
         case 'init':
+          compileFailed = false;
           session = msg.session;
           currentStepIndex = session.currentStepIndex || 0;
           renderCanvas();
