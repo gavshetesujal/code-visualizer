@@ -1,3 +1,4 @@
+import { buildCallGraph } from '../tracer/CallGraph';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as child_process from 'child_process';
@@ -18,6 +19,7 @@ export class VisualizationSession {
   private sessionData: SessionData;
   private lineDecoration: vscode.TextEditorDecorationType;
   private terminalPty?: VisualizerTerminal;
+  private lastCompileStatus?: { status: 'failed' | 'ok' };
   private executionTerminal?: vscode.Terminal;
   private providedInputs: Record<string, string> = {};
   private orderedInputs: string[] = [];
@@ -106,6 +108,7 @@ export class VisualizationSession {
     this.panel.title = `Visualize: ${fileName}`;
     this.orderedInputs = [];
     this.providedInputs = {};
+    this.lastCompileStatus = undefined;
     if (this.terminalPty) {
       this.terminalPty.clear();
     }
@@ -123,7 +126,7 @@ export class VisualizationSession {
     // Send fresh session context to webview (clears old nodes & titles)
     this.panel.webview.postMessage({
       type: 'init',
-      session: this.sessionData
+      session: this.sessionWithGraph()
     });
 
     this.setupHistoryListener();
@@ -158,24 +161,28 @@ export class VisualizationSession {
       this.terminalPty.spawnProgram('python3', [filePath], fileDir);
     } else if (langId === 'cpp') {
       const outBin = path.join(fileDir, `.vis_${path.basename(filePath, '.cpp')}`);
-      this.terminalPty.printInfo(`Compiling ${path.basename(filePath)} with clang++...`);
-      child_process.exec(`clang++ -std=c++17 "${filePath}" -o "${outBin}"`, { cwd: fileDir }, (err, stdout, stderr) => {
+      this.terminalPty.printInfo(`Compiling ${path.basename(filePath)} with clang++ (g++ if clang++ is not installed)...`);
+      this.compileWithFallback('clang++', 'g++', `-std=c++17 "${filePath}" -o "${outBin}"`, fileDir, (err, stdout, stderr) => {
         if (err) {
+          this.postCompileStatus('failed');
           this.terminalPty?.printError(`Compilation failed:\r\n${stderr || err.message}`);
           this.terminalPty?.printInfo('Visual simulation is running. You can enter input here when prompted.');
         } else {
+          this.postCompileStatus('ok');
           this.terminalPty?.printInfo(`Launching ${path.basename(outBin)}...`);
           this.terminalPty?.spawnProgram(outBin, [], fileDir);
         }
       });
     } else if (langId === 'c') {
       const outBin = path.join(fileDir, `.vis_${path.basename(filePath, '.c')}`);
-      this.terminalPty.printInfo(`Compiling ${path.basename(filePath)} with clang...`);
-      child_process.exec(`clang "${filePath}" -o "${outBin}"`, { cwd: fileDir }, (err, stdout, stderr) => {
+      this.terminalPty.printInfo(`Compiling ${path.basename(filePath)} with clang (gcc if clang is not installed)...`);
+      this.compileWithFallback('clang', 'gcc', `"${filePath}" -o "${outBin}"`, fileDir, (err, stdout, stderr) => {
         if (err) {
+          this.postCompileStatus('failed');
           this.terminalPty?.printError(`Compilation failed:\r\n${stderr || err.message}`);
           this.terminalPty?.printInfo('Visual simulation is running. You can enter input here when prompted.');
         } else {
+          this.postCompileStatus('ok');
           this.terminalPty?.printInfo(`Launching ${path.basename(outBin)}...`);
           this.terminalPty?.spawnProgram(outBin, [], fileDir);
         }
@@ -200,6 +207,9 @@ export class VisualizationSession {
       async (msg: WebviewToExtensionMessage) => {
         switch (msg.type) {
           case 'ready':
+            if (this.lastCompileStatus) {
+              this.panel.webview.postMessage({ type: 'compileStatus', status: this.lastCompileStatus.status });
+            }
             this.syncEditorDecoration();
             // Check if initial step is waiting for input
             const initialStep = this.history.getCurrentStep();
@@ -304,7 +314,7 @@ export class VisualizationSession {
 
       this.panel.webview.postMessage({
         type: 'init',
-        session: this.sessionData
+        session: this.sessionWithGraph()
       });
       this.syncEditorDecoration();
       this.runInIntegratedTerminal(editor.document);
@@ -330,6 +340,11 @@ export class VisualizationSession {
     if (!step) return;
 
     this.highlightSpecificLine(step.line);
+  }
+
+  /** Session data plus the function call graph (source simulation, not a real trace) for the Map view. */
+  private sessionWithGraph() {
+    return { ...this.sessionData, callGraph: buildCallGraph(this.sessionData.steps) };
   }
 
   private setupHistoryListener() {
@@ -433,7 +448,7 @@ export class VisualizationSession {
     // Post fresh session to webview
     this.panel.webview.postMessage({
       type: 'init',
-      session: this.sessionData
+      session: this.sessionWithGraph()
     });
     this.syncEditorDecoration();
 
@@ -481,5 +496,32 @@ export class VisualizationSession {
     this.lineDecoration.dispose();
 
     VisualizationSession.activeSessions.delete(this.documentUri.toString());
+  }
+
+  /** Tells the visualizer whether the real compile of the file worked, so a failed compile is visible next to the simulation. */
+  private postCompileStatus(status: 'failed' | 'ok') {
+    this.lastCompileStatus = { status };
+    this.panel.webview.postMessage({ type: 'compileStatus', status });
+  }
+
+  /**
+   * Compiles with the preferred compiler; if that program is not installed, tries the fallback compiler.
+   * A real compile error from the preferred compiler is reported as is (no silent retry).
+   */
+  private compileWithFallback(
+    preferred: string,
+    fallback: string,
+    args: string,
+    cwd: string,
+    done: (err: child_process.ExecException | null, stdout: string, stderr: string) => void
+  ): void {
+    child_process.exec(`${preferred} ${args}`, { cwd }, (err, stdout, stderr) => {
+      const notInstalled = !!err && (err.code === 127 || /not found|not recognized|ENOENT/i.test(`${stderr} ${err.message}`));
+      if (notInstalled) {
+        child_process.exec(`${fallback} ${args}`, { cwd }, done);
+      } else {
+        done(err, stdout, stderr);
+      }
+    });
   }
 }

@@ -33,6 +33,7 @@ interface FunctionDef {
   name: string;
   params: { type: string; name: string }[];
   startLine: number;
+  endLine?: number;
   bodyLines: { lineNum: number; raw: string; trimmed: string }[];
 }
 
@@ -79,6 +80,12 @@ interface ClassDef {
     bodyLines: { lineNum: number; raw: string; trimmed: string }[];
     declaringClass: string;
   };
+}
+
+// A line starting with '*' is a leftover block-comment line ("* text"), unless it is a pointer write such as "*p = 5;".
+function isStrayCommentStar(t: string): boolean {
+  if (!t.startsWith('*')) return false;
+  return !/^\*\s*[a-zA-Z_]\w*\s*(\+=|-=|\*=|\/=|%=|=(?!=))/.test(t);
 }
 
 export class ProgramSimulator {
@@ -147,7 +154,11 @@ export class ProgramSimulator {
         cleanChars.push(ch);
       }
 
-      const clean = cleanChars.join('');
+      // `std::string`, `std::cout`, `std::vector` ... are parsed exactly like the unqualified names. Quoted text is left alone.
+      const clean = cleanChars.join('')
+        .split(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/)
+        .map((part, partIdx) => (partIdx % 2 === 1 ? part : part.replace(/\bstd::/g, '')))
+        .join('');
       result.push({
         lineNum: lineIdx + 1,
         raw,
@@ -600,9 +611,46 @@ export class ProgramSimulator {
       });
     };
 
+    // Helper: find a variable bucket by name (current function frame first, then main/global variables)
+    const findBucketByName = (name: string, frame?: FunctionCallFrame): VariableBucket | undefined => {
+      if (frame) {
+        const local = frame.localVariables.find(v => v.name === name) || frame.parameters.find(p => p.name === name);
+        if (local) return local;
+      }
+      return varMap.get(name);
+    };
+
+    // Helper: if `name` is a pointer variable, return the bucket it points to
+    const resolvePointerTarget = (name: string, frame?: FunctionCallFrame): VariableBucket | undefined => {
+      const ptr = findBucketByName(name, frame);
+      if (!ptr || ptr.type !== 'pointer' || !ptr.pointsTo) return undefined;
+      const targetName = ptr.pointsTo;
+      // The target can live in this frame, in any calling frame (innermost first), or in main
+      const searchFrames = frame ? [frame, ...[...activeFrameStack].reverse()] : [...activeFrameStack].reverse();
+      for (const f of searchFrames) {
+        const hit = f.localVariables.find(v => v.name === targetName) || f.parameters.find(q => q.name === targetName);
+        if (hit) return hit;
+      }
+      return varMap.get(targetName);
+    };
+
     // Helper: Substitute variables and array lookups in an expression
     const substituteVariables = (expr: string, frame?: FunctionCallFrame): string => {
       let exp = expr.trim();
+
+      // 0. Resolve pointer dereference reads: *p, (*p) -> value of the variable p points to.
+      // Only a '*' at the start or right after an operator or '(' is a dereference; 'a * b' stays multiplication.
+      exp = exp.replace(/(^|[(,+\-*\/%=<>!&|?:]\s*)\*\s*([a-zA-Z_]\w*)\b/g, (match, lead, ptrName) => {
+        const target = resolvePointerTarget(ptrName, frame);
+        return target ? `${lead}${target.value || '0'}` : match;
+      });
+
+      // 0b. Protect addresses (&x, or a pointer's own value "&x") so the variable x inside them is not replaced by its value.
+      // The protected form is turned back into "&x" at the end.
+      const addrToken = (name: string) => `__ADDR_${name}__`;
+      const valueForSubst = (v: VariableBucket): string =>
+        v.type === 'pointer' && v.value && /^&[a-zA-Z_]\w*$/.test(v.value) ? addrToken(v.value.slice(1)) : (v.value || '0');
+      exp = exp.replace(/(^|[(,+\-*\/%=<>!|?:]\s*)&\s*([a-zA-Z_]\w*)\b/g, (_m, lead, name) => `${lead}${addrToken(name)}`);
 
       // 1. Resolve array cell access: arr[i], arr[0], etc.
       exp = exp.replace(/([a-zA-Z_]\w*)\s*\[\s*([^\]]+)\s*\]/g, (match, arrName, idxExpr) => {
@@ -620,10 +668,10 @@ export class ProgramSimulator {
       // 2. Substitute frame-specific variables (local variables and parameters)
       if (frame) {
         frame.localVariables.forEach(v => {
-          exp = exp.replace(new RegExp(`\\b${v.name}\\b`, 'g'), v.value || '0');
+          exp = exp.replace(new RegExp(`\\b${v.name}\\b`, 'g'), valueForSubst(v));
         });
         frame.parameters.forEach(p => {
-          exp = exp.replace(new RegExp(`\\b${p.name}\\b`, 'g'), p.value || '0');
+          exp = exp.replace(new RegExp(`\\b${p.name}\\b`, 'g'), valueForSubst(p));
         });
       }
 
@@ -646,10 +694,10 @@ export class ProgramSimulator {
       // 3. Substitute global / main variables
       varMap.forEach((v, k) => {
         const simpleName = k.includes(':') ? k.split(':')[1] : k;
-        exp = exp.replace(new RegExp(`\\b${simpleName}\\b`, 'g'), v.value || '0');
+        exp = exp.replace(new RegExp(`\\b${simpleName}\\b`, 'g'), valueForSubst(v));
       });
 
-      return exp;
+      return exp.replace(/__ADDR_([a-zA-Z_]\w*?)__/g, '&$1');
     };
 
     // Helper: Pure arithmetic expression evaluation
@@ -667,6 +715,12 @@ export class ProgramSimulator {
       if (cleaned === 'true') return 'true';
       if (cleaned === 'false') return 'false';
       if (/^[a-zA-Z_]\w*$/.test(cleaned)) return cleaned;
+      // A lone address such as "&value" is shown as-is
+      if (/^&[a-zA-Z_]\w*$/.test(cleaned)) return cleaned;
+      // In comparisons a pointer holding an address is non-null, and nullptr/NULL are 0
+      if (/&[a-zA-Z_]\w*|\bnullptr\b|\bNULL\b/.test(cleaned)) {
+        cleaned = cleaned.replace(/\bnullptr\b|\bNULL\b/g, '0').replace(/&[a-zA-Z_]\w*/g, '1');
+      }
 
       try {
         const res = Function(`"use strict"; return (${cleaned});`)();
@@ -805,10 +859,13 @@ export class ProgramSimulator {
       // Bind parameters
       const paramBuckets: VariableBucket[] = targetFunc.params.map((p, i) => {
         const val = evaluatedArgs[i] !== undefined ? evaluatedArgs[i] : '0';
+        // A pointer parameter receiving an address (e.g. incrementViaPointer(&x) or (ptr)) keeps pointing at the caller's variable
+        const isPointerParam = p.type.includes('*') && /^&[a-zA-Z_]\w*$/.test(val);
         return {
           name: p.name,
           value: val,
-          type: p.type,
+          type: isPointerParam ? 'pointer' : p.type,
+          pointsTo: isPointerParam ? val.slice(1) : undefined,
           scope: frameId,
           isNew: true
         };
@@ -866,7 +923,8 @@ export class ProgramSimulator {
       frame.isReturning = true;
 
       recordStep(
-        targetFunc.startLine,
+        // highlight the `return` statement that actually ran, not the function definition
+        (result && result.returnLine !== undefined) ? result.returnLine : (targetFunc.endLine !== undefined ? targetFunc.endLine : targetFunc.startLine),
         targetFunc.returnType === 'void' ? `return;` : `return ${funcReturnValue};`,
         `Function '${frame.callSignature}' finished: returned ${funcReturnValue ? funcReturnValue : 'void'} to ${callerFrame ? callerFrame.callSignature : 'main()'}.`,
         { funcFrame: frame }
@@ -917,6 +975,18 @@ export class ProgramSimulator {
       return funcReturnValue;
     };
 
+    // Loop condition such as "i < n": the loop variable gets its current value, everything else (including the
+    // parameters and locals of the function the loop runs in) is substituted like in any other expression.
+    const evalLoopCondition = (cond: string, loopVarName: string, loopVarVal: number, frame?: FunctionCallFrame): boolean => {
+      try {
+        const withLoopVar = cond.replace(new RegExp(`\\b${loopVarName}\\b`, 'g'), String(loopVarVal));
+        const substituted = substituteVariables(withLoopVar, frame);
+        return Boolean(Function(`"use strict"; return (${substituted});`)());
+      } catch (e) {
+        return false;
+      }
+    };
+
     const evalGeneralCondition = (cond: string, frame?: FunctionCallFrame): boolean => {
       try {
         const val = evalExpressionWithCalls(cond, frame);
@@ -935,9 +1005,9 @@ export class ProgramSimulator {
         if (tok === 'endl') {
           out += '\n';
         } else if (tok.startsWith('"') && tok.endsWith('"')) {
-          out += tok.slice(1, -1);
+          out += ProgramSimulator.unescapeCppLiteral(tok.slice(1, -1));
         } else if (tok.startsWith("'") && tok.endsWith("'")) {
-          out += tok.slice(1, -1);
+          out += ProgramSimulator.unescapeCppLiteral(tok.slice(1, -1));
         } else {
           try {
             const val = evalExpressionWithCalls(tok, frame);
@@ -975,7 +1045,7 @@ export class ProgramSimulator {
       stmts: { lineNum: number; raw: string; trimmed: string }[],
       scopeName: string,
       currentFrame?: FunctionCallFrame
-    ) => { hasReturned: boolean; returnValue?: string };
+    ) => { hasReturned: boolean; returnValue?: string; returnLine?: number };
 
     const executeClassMemberFunction = (
       targetCls: ClassDef,
@@ -1107,7 +1177,7 @@ export class ProgramSimulator {
       stmts: { lineNum: number; raw: string; trimmed: string }[],
       scopeName: string,
       currentFrame?: FunctionCallFrame
-    ): { hasReturned: boolean; returnValue?: string } => {
+    ): { hasReturned: boolean; returnValue?: string; returnLine?: number } => {
       let idx = 0;
       while (idx < stmts.length) {
         if (isWaitingForInput) {
@@ -1116,7 +1186,7 @@ export class ProgramSimulator {
         const cur = stmts[idx];
         const trimmed = cur.trimmed;
 
-        if (!trimmed || trimmed === '{' || trimmed === '}' || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('#') || trimmed.startsWith('using')) {
+        if (!trimmed || trimmed === '{' || trimmed === '}' || trimmed.startsWith('//') || trimmed.startsWith('/*') || isStrayCommentStar(trimmed) || trimmed.startsWith('#') || trimmed.startsWith('using')) {
           idx++;
           continue;
         }
@@ -1143,7 +1213,7 @@ export class ProgramSimulator {
           }
 
           idx++;
-          return { hasReturned: true, returnValue: retVal };
+          return { hasReturned: true, returnValue: retVal, returnLine: cur.lineNum };
         }
 
         // 0. Class Object Instantiation with Constructor Arguments: e.g. Student s1("Alex", 18, 101);
@@ -1681,7 +1751,7 @@ export class ProgramSimulator {
 
         // 0.3 Member Variable Assignment inside class method: e.g. age = age + 1; or age = 20;
         if (currentExecutingClass && currentExecutingObject) {
-          const assignMemberMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
+          const assignMemberMatch = trimmed.match(/^(?:this->)?([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
           if (assignMemberMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin')) {
             const mVarName = assignMemberMatch[1];
             const op = assignMemberMatch[2];
@@ -2001,6 +2071,9 @@ export class ProgramSimulator {
 
           activeLoopStack.push(loopState);
 
+          // `for (int i = ...)` scopes i to the loop: remember what was there so it can be restored when the loop ends
+          const loopVarIsLocal = !!loopVarName && /\b(?:int|long|short|unsigned|size_t|auto)\s+[a-zA-Z_]\w*\s*=/.test(initPart);
+          const shadowedLoopVar = loopVarName ? varMap.get(loopVarName) : undefined;
           if (loopVarName) {
             if (!varMap.has(loopVarName)) {
               varOrder.push(loopVarName);
@@ -2023,6 +2096,7 @@ export class ProgramSimulator {
           );
 
           const iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[] = [];
+          let loopReturn: { hasReturned: boolean; returnValue?: string; returnLine?: number } | undefined;
           const SAFEGUARD_MAX_ITERATIONS = 10000;
           let iteration = 1;
 
@@ -2030,7 +2104,7 @@ export class ProgramSimulator {
             const iterStart = steps.length;
 
             // Step 2: Condition
-            const condPassed = this.evalCondition(condPart, loopVarName, loopVarVal, varMap);
+            const condPassed = evalLoopCondition(condPart, loopVarName, loopVarVal, currentFrame);
             loopState.phase = 'condition';
             loopState.iteration = iteration;
             loopState.conditionPassed = condPassed;
@@ -2065,7 +2139,12 @@ export class ProgramSimulator {
 
             // Step 3: Body execution
             loopState.phase = 'body';
-            executeStatements(bodyLines, `${scopeName}_loop`);
+            const bodyRes = executeStatements(bodyLines, `${scopeName}_loop`, currentFrame);
+            if (bodyRes && bodyRes.hasReturned) {
+              loopReturn = bodyRes;
+              iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: steps.length });
+              break;
+            }
             if (isWaitingForInput) {
               const iterEnd = steps.length;
               iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
@@ -2119,6 +2198,18 @@ export class ProgramSimulator {
             cur.lineNum,
             iterationStepRanges
           );
+          if (loopVarIsLocal) {
+            if (shadowedLoopVar) {
+              varMap.set(loopVarName, shadowedLoopVar);
+            } else {
+              varMap.delete(loopVarName);
+              const vi = varOrder.indexOf(loopVarName);
+              if (vi >= 0) varOrder.splice(vi, 1);
+            }
+          }
+          if (loopReturn) {
+            return loopReturn;
+          }
           continue;
         }
 
@@ -2152,13 +2243,14 @@ export class ProgramSimulator {
           activeLoopStack.push(loopState);
 
           const iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[] = [];
+          let loopReturn: { hasReturned: boolean; returnValue?: string; returnLine?: number } | undefined;
           const SAFEGUARD_MAX_ITERATIONS = 10000;
           let iteration = 1;
 
           while (iteration <= SAFEGUARD_MAX_ITERATIONS) {
             const iterStart = steps.length;
             const curValNum = varMap.has(loopVarName) ? parseFloat(varMap.get(loopVarName)!.value) : 0;
-            const condPassed = this.evalCondition(condPart, loopVarName, curValNum, varMap);
+            const condPassed = evalLoopCondition(condPart, loopVarName, curValNum, currentFrame);
             loopState.phase = 'condition';
             loopState.iteration = iteration;
             loopState.conditionPassed = condPassed;
@@ -2188,9 +2280,13 @@ export class ProgramSimulator {
 
             previousValues.push(String(curValNum));
             loopState.phase = 'body';
-            executeStatements(bodyLines, `${scopeName}_while`);
+            const bodyRes = executeStatements(bodyLines, `${scopeName}_while`, currentFrame);
             const iterEnd = steps.length;
             iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
+            if (bodyRes && bodyRes.hasReturned) {
+              loopReturn = bodyRes;
+              break;
+            }
             if (isWaitingForInput) {
               break;
             }
@@ -2217,6 +2313,9 @@ export class ProgramSimulator {
             cur.lineNum,
             iterationStepRanges
           );
+          if (loopReturn) {
+            return loopReturn;
+          }
           continue;
         }
 
@@ -2262,6 +2361,7 @@ export class ProgramSimulator {
           activeLoopStack.push(loopState);
 
           const iterationStepRanges: { iteration: number; startIndex: number; endIndex: number }[] = [];
+          let loopReturn: { hasReturned: boolean; returnValue?: string; returnLine?: number } | undefined;
           const SAFEGUARD_MAX_ITERATIONS = 10000;
           let iteration = 1;
 
@@ -2271,7 +2371,12 @@ export class ProgramSimulator {
             loopState.phase = 'body';
             loopState.iteration = iteration;
             recordStep(cur.lineNum, `do { ... } [Iteration ${iteration}]`, `Executing do-while loop body (Iteration ${iteration}).`);
-            executeStatements(bodyLines, `${scopeName}_dowhile`);
+            const bodyRes = executeStatements(bodyLines, `${scopeName}_dowhile`, currentFrame);
+            if (bodyRes && bodyRes.hasReturned) {
+              loopReturn = bodyRes;
+              iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: steps.length });
+              break;
+            }
             if (isWaitingForInput) {
               const iterEnd = steps.length;
               iterationStepRanges.push({ iteration, startIndex: iterStart, endIndex: iterEnd });
@@ -2333,6 +2438,9 @@ export class ProgramSimulator {
             cur.lineNum,
             iterationStepRanges
           );
+          if (loopReturn) {
+            return loopReturn;
+          }
           continue;
         }
 
@@ -2345,11 +2453,19 @@ export class ProgramSimulator {
             const condPassed = evalGeneralCondition(condPart, currentFrame);
 
             let ifBody: { lineNum: number; raw: string; trimmed: string }[] = [];
+            let inlineElseBody: { lineNum: number; raw: string; trimmed: string }[] | null = null;
             let ifEnd = idx;
 
             if (inlineStmt && !inlineStmt.startsWith('{')) {
-              // Single-line if (e.g. if (n <= 1) return 1;)
-              ifBody = [{ lineNum: cur.lineNum, raw: inlineStmt, trimmed: inlineStmt }];
+              // Single-line if (e.g. if (n <= 1) return 1;), optionally with an else on the same line
+              // (e.g. if (i % 2 == 0) s += i; else s -= 1;)
+              const inlineElseMatch = inlineStmt.match(/^(.*?;)\s*else\s+(?!if\b)(.+)$/);
+              if (inlineElseMatch) {
+                ifBody = [{ lineNum: cur.lineNum, raw: inlineElseMatch[1], trimmed: inlineElseMatch[1].trim() }];
+                inlineElseBody = [{ lineNum: cur.lineNum, raw: inlineElseMatch[2], trimmed: inlineElseMatch[2].trim() }];
+              } else {
+                ifBody = [{ lineNum: cur.lineNum, raw: inlineStmt, trimmed: inlineStmt }];
+              }
               ifEnd = idx;
             } else {
               const extracted = this.extractBlockBody(stmts, idx);
@@ -2364,11 +2480,16 @@ export class ProgramSimulator {
             let elseIfBody: { lineNum: number; raw: string; trimmed: string }[] | null = null;
 
             let elseIdx = ifEnd;
-            if (elseIdx < stmts.length && !stmts[elseIdx].trimmed.includes('else')) {
+            if (inlineElseBody) {
+              elseBody = inlineElseBody;
+              idx = ifEnd + 1;
+            } else if (elseIdx < stmts.length && !stmts[elseIdx].trimmed.includes('else')) {
               elseIdx++;
             }
 
-            if (elseIdx < stmts.length && stmts[elseIdx].trimmed.includes('else')) {
+            if (inlineElseBody) {
+              // else branch already taken from the same source line
+            } else if (elseIdx < stmts.length && stmts[elseIdx].trimmed.includes('else')) {
               const elseLine = stmts[elseIdx].trimmed;
               if (elseLine.includes('else if')) {
                 const elseIfMatch = elseLine.match(/else\s+if\s*\(\s*(.*?)\s*\)/);
@@ -2651,8 +2772,12 @@ export class ProgramSimulator {
             const varName = (eqIdx !== -1 ? def.slice(0, eqIdx) : def).trim();
             let initVal = eqIdx !== -1 ? def.slice(eqIdx + 1).trim() : '';
 
-            // Evaluate expression with potential function calls!
-            if (initVal) {
+            // Smart pointers and `new` need heap ownership, which this simulator does not model.
+            // Say so instead of showing the raw source text as if it were a value.
+            if (initVal && /\b(?:make_unique|make_shared|unique_ptr|shared_ptr)\b|^new\b/.test(initVal)) {
+              initVal = 'not simulated';
+            } else if (initVal) {
+              // Evaluate expression with potential function calls!
               initVal = evalExpressionWithCalls(initVal, currentFrame);
             }
 
@@ -2754,6 +2879,43 @@ export class ProgramSimulator {
           }
         }
 
+        // 11b. WRITE THROUGH A POINTER (e.g. *p = *p + 1;  *p += 5;  (*p)++;  (*p)--;)
+        const derefAssignMatch = trimmed.match(/^\(?\s*\*\s*([a-zA-Z_]\w*)\s*\)?\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
+        const derefIncMatch = trimmed.match(/^\(\s*\*\s*([a-zA-Z_]\w*)\s*\)\s*(\+\+|--)\s*;$/);
+        if (derefAssignMatch || derefIncMatch) {
+          const ptrName = (derefAssignMatch || derefIncMatch)![1];
+          const pointerBucket = findBucketByName(ptrName, currentFrame);
+          const targetBucket = resolvePointerTarget(ptrName, currentFrame);
+          if (targetBucket && pointerBucket) {
+            const oldVal = targetBucket.value;
+            let newVal: string;
+            if (derefIncMatch) {
+              newVal = String(parseFloat(oldVal || '0') + (derefIncMatch[2] === '++' ? 1 : -1));
+            } else {
+              const op = derefAssignMatch![2];
+              newVal = evalExpressionWithCalls(derefAssignMatch![3].trim(), currentFrame);
+              if (op === '+=') newVal = String(parseFloat(oldVal || '0') + parseFloat(newVal));
+              else if (op === '-=') newVal = String(parseFloat(oldVal || '0') - parseFloat(newVal));
+              else if (op === '*=') newVal = String(parseFloat(oldVal || '0') * parseFloat(newVal));
+              else if (op === '/=') newVal = String(parseFloat(oldVal || '0') / (parseFloat(newVal) || 1));
+              else if (op === '%=') newVal = String(parseFloat(oldVal || '0') % (parseFloat(newVal) || 1));
+            }
+            targetBucket.previousValue = oldVal;
+            targetBucket.value = newVal;
+            targetBucket.isModified = true;
+            targetBucket.isEmpty = false;
+
+            recordStep(
+              cur.lineNum,
+              trimmed,
+              `Wrote through pointer '${ptrName}': '${targetBucket.name}' changed from '${oldVal}' to '${newVal}'. The pointer itself still holds the address of '${targetBucket.name}'.`,
+              { modifiedVar: currentFrame ? undefined : targetBucket.name, funcFrame: currentFrame }
+            );
+            idx++;
+            continue;
+          }
+        }
+
         // 12. VARIABLE ASSIGNMENT (e.g. a = 20; a = 50; a += 5;)
         const assignMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
         if (assignMatch && !trimmed.startsWith('cout') && !trimmed.startsWith('cin')) {
@@ -2813,7 +2975,24 @@ export class ProgramSimulator {
     };
 
     // Execute Main Program
-    executeStatements(mainLines, 'main');
+    const mainResult = executeStatements(mainLines, 'main');
+    if (mainResult && !mainResult.hasReturned && !isWaitingForInput && steps.length > 0) {
+      // main has no `return`: C++ returns 0 implicitly when execution reaches its closing brace
+      const mainIdx = cleanLines.findIndex(l => /^(?:int|void)\s+main\s*\(/.test(l.trimmed));
+      if (mainIdx !== -1) {
+        const endIdx = this.extractBlockBody(cleanLines, mainIdx).endLineIdx;
+        const endLine = cleanLines[Math.min(endIdx, cleanLines.length - 1)].lineNum;
+        recordStep(endLine, 'end of main', 'main() reached its closing brace and returned 0 implicitly. The program has finished.');
+      }
+    }
+    if (mainResult && mainResult.hasReturned && !isWaitingForInput && steps.length > 0 && mainResult.returnLine !== undefined) {
+      // Final step: main() returned, so the program is finished (previously the last step was the last statement before the return)
+      recordStep(
+        mainResult.returnLine,
+        `return ${mainResult.returnValue !== undefined && mainResult.returnValue !== '' ? mainResult.returnValue : '0'};`,
+        `main() returned ${mainResult.returnValue !== undefined && mainResult.returnValue !== '' ? mainResult.returnValue : '0'}. The program has finished.`
+      );
+    }
 
     if (steps.length === 0) {
       return {
@@ -3025,6 +3204,60 @@ export class ProgramSimulator {
     return result;
   }
 
+  /**
+   * Rewrites compact class members into the multi-line form the class parser understands:
+   *   Account(int b) : balance(b) {}          ->  Account(int b) {  this->balance = b;  }
+   *   void deposit(int x) { balance += x; }   ->  void deposit(int x) {  balance += x;  }
+   * Every produced line keeps the original line number, so the editor highlight stays on the source line.
+   */
+  private static expandCompactMembers(
+    lines: { lineNum: number; raw: string; trimmed: string }[],
+    baseClassNames: string[]
+  ): { lineNum: number; raw: string; trimmed: string }[] {
+    const out: { lineNum: number; raw: string; trimmed: string }[] = [];
+    const push = (src: { lineNum: number; raw: string }, text: string) => out.push({ lineNum: src.lineNum, raw: src.raw, trimmed: text });
+    const splitTop = (str: string, sep: string): string[] => {
+      const parts: string[] = [];
+      let cur = '';
+      let depth = 0;
+      let inStr = false;
+      for (const ch of str) {
+        if (ch === '"') inStr = !inStr;
+        if (!inStr) {
+          if (ch === '(' || ch === '{' || ch === '[') depth++;
+          else if (ch === ')' || ch === '}' || ch === ']') depth--;
+        }
+        if (ch === sep && depth === 0 && !inStr) { parts.push(cur.trim()); cur = ''; } else { cur += ch; }
+      }
+      if (cur.trim()) parts.push(cur.trim());
+      return parts.filter(p => p.length > 0);
+    };
+    // header: optional specifiers/return type, name, (params), optional const, optional ": init, init", then "{" and maybe a body and "}"
+    const memberRe = /^((?:(?:inline|static|virtual|explicit)\s+)?(?:[\w:<>*&]+\s+)*?[a-zA-Z_]\w*\s*\([^()]*\))\s*(?:const\s*)?(?::\s*([^{]*?))?\s*\{(.*?)(\})?\s*;?$/;
+    for (const line of lines) {
+      const t = line.trimmed;
+      const m = t.match(memberRe);
+      const hasInit = !!(m && m[2]);
+      const inlineBody = !!(m && m[4] === '}');
+      if (!m || /^(if|for|while|switch|else|return|class|struct)\b/.test(t) || (!hasInit && !inlineBody)) {
+        push(line, t);
+        continue;
+      }
+      push(line, `${m[1].trim()} {`);
+      if (hasInit) {
+        for (const init of splitTop(m[2], ',')) {
+          const im = init.match(/^([a-zA-Z_]\w*)\s*[({]\s*(.*?)\s*[)}]$/);
+          if (im && !baseClassNames.includes(im[1])) push(line, `this->${im[1]} = ${im[2] || '0'};`);
+        }
+      }
+      if (inlineBody) {
+        for (const stmt of splitTop(m[3], ';')) push(line, `${stmt};`);
+        push(line, '}');
+      }
+    }
+    return out;
+  }
+
   private static extractClasses(
     lines: { lineNum: number; raw: string; clean?: string; trimmed: string }[]
   ): Map<string, ClassDef> {
@@ -3051,7 +3284,9 @@ export class ProgramSimulator {
           }
         }
 
-        const { bodyLines, endLineIdx } = this.extractBlockBody(lines, i);
+        const { bodyLines: rawClassBodyLines, endLineIdx } = this.extractBlockBody(lines, i);
+        // Compact members (one-line bodies, constructor initializer lists) are rewritten into the multi-line form below
+        const bodyLines = this.expandCompactMembers(rawClassBodyLines, baseClasses.map(bc => bc.baseClassName));
 
         let currentAccess: ClassAccessSpecifier = 'private'; // default in C++ class
         let constructorDef: ClassDef['constructorDef'] = undefined;
@@ -3217,7 +3452,7 @@ export class ProgramSimulator {
         i = endLineIdx + 1;
         continue;
       }
-      const funcMatch = line.match(/^(int|void|float|double|char|string|bool)\s+([a-zA-Z_]\w*)\s*\((.*?)\)\s*\{?$/);
+      const funcMatch = line.match(/^(int|void|float|double|char|string|bool)\s+([a-zA-Z_]\w*)\s*\(([^()]*)\)\s*(?:\{.*)?$/);
       if (funcMatch && funcMatch[2] !== 'main') {
         const returnType = funcMatch[1];
         const name = funcMatch[2];
@@ -3246,6 +3481,7 @@ export class ProgramSimulator {
           name,
           params,
           startLine: lines[i].lineNum,
+          endLine: lines[Math.min(endLineIdx, lines.length - 1)].lineNum,
           bodyLines
         });
         i = endLineIdx + 1;
@@ -3275,7 +3511,7 @@ export class ProgramSimulator {
     // If no explicit main(), filter out function definitions and use top-level statements
     return lines.filter(l => {
       const t = l.trimmed;
-      return t && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*') && !t.startsWith('#') && !t.startsWith('using');
+      return t && !t.startsWith('//') && !t.startsWith('/*') && !isStrayCommentStar(t) && !t.startsWith('#') && !t.startsWith('using');
     });
   }
 
@@ -3285,6 +3521,44 @@ export class ProgramSimulator {
   ): { bodyLines: { lineNum: number; raw: string; clean?: string; trimmed: string }[]; endLineIdx: number } {
     const bodyLines: { lineNum: number; raw: string; clean?: string; trimmed: string }[] = [];
     let endLineIdx = startIdx;
+
+    // Compact block on one line, e.g. `for (int j = 0; j < 6; j++) { v.push_back(j); }` or `while (x > 0) { x -= 7; }`:
+    // the body is the text between the braces, and it ends on this same line.
+    {
+      const headerText = lines[startIdx].clean !== undefined ? lines[startIdx].clean! : lines[startIdx].trimmed;
+      const firstBrace = headerText.indexOf('{');
+      if (firstBrace !== -1) {
+        let depth = 0;
+        let inStr = false;
+        let strCh = '';
+        let closeAt = -1;
+        for (let ci = firstBrace; ci < headerText.length; ci++) {
+          const ch = headerText[ci];
+          if (inStr) { if (ch === '\\') ci++; else if (ch === strCh) inStr = false; continue; }
+          if (ch === '"' || ch === "'") { inStr = true; strCh = ch; continue; }
+          if (ch === '{') depth++;
+          else if (ch === '}') { depth--; if (depth === 0) { closeAt = ci; break; } }
+        }
+        if (closeAt !== -1) {
+          const inner = headerText.slice(firstBrace + 1, closeAt);
+          const stmts: string[] = [];
+          let cur = '';
+          let d = 0;
+          let q = false;
+          for (const ch of inner) {
+            if (ch === '"') q = !q;
+            if (!q) { if (ch === '(' || ch === '{') d++; else if (ch === ')' || ch === '}') d--; }
+            cur += ch;
+            if (ch === ';' && d === 0 && !q) { stmts.push(cur.trim()); cur = ''; }
+          }
+          if (cur.trim()) stmts.push(cur.trim());
+          for (const st of stmts) {
+            bodyLines.push({ lineNum: lines[startIdx].lineNum, raw: st, trimmed: st });
+          }
+          return { bodyLines, endLineIdx: startIdx };
+        }
+      }
+    }
 
     let i = startIdx + 1;
     let braceCount = 0;
@@ -3303,7 +3577,7 @@ export class ProgramSimulator {
           braceCount = 1;
           i++;
           continue;
-        } else if (line.trimmed && !line.trimmed.startsWith('//') && !line.trimmed.startsWith('/*') && !line.trimmed.startsWith('*')) {
+        } else if (line.trimmed && !line.trimmed.startsWith('//') && !line.trimmed.startsWith('/*') && !isStrayCommentStar(line.trimmed)) {
           bodyLines.push(line);
           endLineIdx = i;
           return { bodyLines, endLineIdx };
@@ -3344,7 +3618,7 @@ export class ProgramSimulator {
           break;
         }
         // Only include non-comment lines
-        if (line.trimmed && !line.trimmed.startsWith('//') && !line.trimmed.startsWith('/*') && !line.trimmed.startsWith('*')) {
+        if (line.trimmed && !line.trimmed.startsWith('//') && !line.trimmed.startsWith('/*') && !isStrayCommentStar(line.trimmed)) {
           bodyLines.push(line);
         }
       }
@@ -3439,6 +3713,11 @@ export class ProgramSimulator {
     }
   }
 
+  /** Turns C++ escape sequences inside a string/char literal (\\", \\n, \\t, \\\\) into the characters they print. */
+  private static unescapeCppLiteral(text: string): string {
+    return text.replace(/\\(["'\\ntr0])/g, (_m, c) => (c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === '0' ? '\0' : c));
+  }
+
   private static evalCout(stmt: string, varMap: Map<string, VariableBucket>): string {
     const cleaned = stmt.replace(/^cout\s*<<\s*/, '').replace(/;$/, '');
     const tokens = cleaned.split('<<').map(t => t.trim());
@@ -3448,9 +3727,9 @@ export class ProgramSimulator {
       if (tok === 'endl') {
         out += '\n';
       } else if (tok.startsWith('"') && tok.endsWith('"')) {
-        out += tok.slice(1, -1);
+        out += ProgramSimulator.unescapeCppLiteral(tok.slice(1, -1));
       } else if (tok.startsWith("'") && tok.endsWith("'")) {
-        out += tok.slice(1, -1);
+        out += ProgramSimulator.unescapeCppLiteral(tok.slice(1, -1));
       } else if (varMap.has(tok)) {
         out += varMap.get(tok)!.value;
       } else {
