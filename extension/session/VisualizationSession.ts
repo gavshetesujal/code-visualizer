@@ -1,3 +1,4 @@
+import { buildCallGraph } from '../tracer/CallGraph';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as child_process from 'child_process';
@@ -125,7 +126,7 @@ export class VisualizationSession {
     // Send fresh session context to webview (clears old nodes & titles)
     this.panel.webview.postMessage({
       type: 'init',
-      session: this.sessionData
+      session: this.sessionWithGraph()
     });
 
     this.setupHistoryListener();
@@ -313,7 +314,7 @@ export class VisualizationSession {
 
       this.panel.webview.postMessage({
         type: 'init',
-        session: this.sessionData
+        session: this.sessionWithGraph()
       });
       this.syncEditorDecoration();
       this.runInIntegratedTerminal(editor.document);
@@ -339,6 +340,11 @@ export class VisualizationSession {
     if (!step) return;
 
     this.highlightSpecificLine(step.line);
+  }
+
+  /** Session data plus the function call graph (source simulation, not a real trace) for the Map view. */
+  private sessionWithGraph() {
+    return { ...this.sessionData, callGraph: buildCallGraph(this.sessionData.steps) };
   }
 
   private setupHistoryListener() {
@@ -442,7 +448,7 @@ export class VisualizationSession {
     // Post fresh session to webview
     this.panel.webview.postMessage({
       type: 'init',
-      session: this.sessionData
+      session: this.sessionWithGraph()
     });
     this.syncEditorDecoration();
 
