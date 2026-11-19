@@ -10,8 +10,21 @@ import { DiagnosticLogger } from '../tracer/DiagnosticLogger';
  * passes entered text to the running process's stdin, and synchronizes with Code Visualizer.
  */
 export class VisualizerTerminal implements vscode.Pseudoterminal {
-  private writeEmitter = new vscode.EventEmitter<string>();
-  readonly onDidWrite: vscode.Event<string> = this.writeEmitter.event;
+  private rawWriteEmitter = new vscode.EventEmitter<string>();
+  readonly onDidWrite: vscode.Event<string> = this.rawWriteEmitter.event;
+  // VS Code only delivers writes after open(); anything written earlier (compile notice, program output)
+  // used to be dropped. Hold it until the terminal is open, then flush in order.
+  private isOpen = false;
+  private pendingWrites: string[] = [];
+  private writeEmitter = {
+    fire: (text: string) => {
+      if (this.isOpen) {
+        this.rawWriteEmitter.fire(text);
+      } else {
+        this.pendingWrites.push(text);
+      }
+    }
+  };
 
   private closeEmitter = new vscode.EventEmitter<number>();
   readonly onDidClose: vscode.Event<number> = this.closeEmitter.event;
@@ -26,7 +39,12 @@ export class VisualizerTerminal implements vscode.Pseudoterminal {
   constructor() {}
 
   public open(initialDimensions: vscode.TerminalDimensions | undefined): void {
-    this.writeEmitter.fire('\x1b[1;36m=== Code Visualizer Integrated Terminal ===\x1b[0m\r\n');
+    this.isOpen = true;
+    this.rawWriteEmitter.fire('\x1b[1;36m=== Code Visualizer Integrated Terminal ===\x1b[0m\r\n');
+    for (const text of this.pendingWrites) {
+      this.rawWriteEmitter.fire(text);
+    }
+    this.pendingWrites = [];
     DiagnosticLogger.log('TERMINAL_STATUS', 'Visualizer integrated terminal opened');
   }
 
@@ -64,7 +82,7 @@ export class VisualizerTerminal implements vscode.Pseudoterminal {
   }
 
   public printError(msg: string) {
-    this.writeEmitter.fire(`\r\n\x1b[31m[Error] ${msg}\x1b[0m\r\n`);
+    this.writeEmitter.fire(`\r\n\x1b[31m[Error] ${msg.replace(/\r?\n/g, '\r\n')}\x1b[0m\r\n`);
   }
 
   /**
@@ -220,7 +238,7 @@ export class VisualizerTerminal implements vscode.Pseudoterminal {
 
   public dispose() {
     this.terminateRunningProcess();
-    this.writeEmitter.dispose();
+    this.rawWriteEmitter.dispose();
     this.closeEmitter.dispose();
   }
 }
